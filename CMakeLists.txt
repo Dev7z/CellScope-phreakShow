@@ -123,6 +123,7 @@ add_executable(CellScope
     src/signal/processing.cpp
     src/voice/voice_ops.cpp
     src/gui/gui_panels.cpp
+    src/gui/phreakshow.cpp
     src/session/session.cpp
     src/state/config.cpp
     src/sdr/rtl_sdr_source.cpp

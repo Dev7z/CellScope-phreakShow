@@ -11,6 +11,7 @@
 #include "util/log.h"
 #include "version.h"
 #include "gui/waterfall.h"
+#include "gui/phreakshow.h"
 #include <algorithm>
 #include <cfloat>
 #include <chrono>
@@ -1834,7 +1835,7 @@ void drawLteCalls(App& app)
 // layout via a custom settings handler.
 // ---------------------------------------------------------------------------
 
-void drawDockHost(App& app)
+bool drawDockHost(App& app)
 {
     // The default dock layout is a baked-in ImGui .ini loaded from main() (on
     // first run / version bump / Reset Layout). Here we only host the dockspace;
@@ -1857,9 +1858,28 @@ void drawDockHost(App& app)
     ImGui::PopStyleVar(3);
 
     ImGuiID dockId = ImGui::GetID("CellScopeDockSpace");
-    ImGui::DockSpace(dockId, ImVec2(0, 0), ImGuiDockNodeFlags_NoUndocking);
+    bool showCellScope = false;
+    if (ImGui::BeginTabBar("ApplicationTabs"))
+    {
+        if (ImGui::BeginTabItem("CellScope"))
+        {
+            showCellScope = true;
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("phreakShow"))
+        {
+            drawPhreakShow();
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+    // Inactive dockspaces must stay alive to preserve their window assignments.
+    if (showCellScope)
+        ImGui::DockSpace(dockId, ImVec2(0, 0), ImGuiDockNodeFlags_NoUndocking);
+    else
+        ImGui::DockSpace(dockId, ImVec2(0, 0), ImGuiDockNodeFlags_KeepAliveOnly);
 
-    if (ImGui::BeginMenuBar())
+    if (showCellScope && ImGui::BeginMenuBar())
     {
         if (ImGui::BeginMenu(_L("View")))
         {
@@ -1880,5 +1900,6 @@ void drawDockHost(App& app)
     }
 
     ImGui::End();
+    return showCellScope;
 }
 

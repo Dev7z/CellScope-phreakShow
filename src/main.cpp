@@ -178,7 +178,7 @@ int main(int, char**)
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        drawDockHost(app);
+        const bool showCellScope = drawDockHost(app);
 
         if (app.active->running())
             processFft(app.viewA, app, app.active->centerFreq(), app.active->sampleRate());
@@ -201,33 +201,36 @@ int main(int, char**)
                     app.savedDecodersB.push_back({st.freqMHz, st.baud});
         }
 
-        drawControls(app);
+        if (showCellScope)
         {
-            std::string t = std::string(_L("Spectrum")) + "###Spectrum";
-            drawSpectrum(app, app.viewA, app.decoders, t.c_str(), true, false);
-        }
-        {
-            std::string t = std::string(_L("Waterfall")) + "###Waterfall";
-            drawWaterfall(app, app.viewA, t.c_str());
-        }
-        if (app.dualMode)
-        {
+            drawControls(app);
             {
-                std::string t = std::string(_L("Spectrum")) + "###Spectrum (B)";
-                drawSpectrum(app, app.viewB, app.decodersB, t.c_str(), true, true);
+                std::string t = std::string(_L("Spectrum")) + "###Spectrum";
+                drawSpectrum(app, app.viewA, app.decoders, t.c_str(), true, false);
             }
             {
-                std::string t = std::string(_L("Waterfall")) + "###Waterfall (B)";
-                drawWaterfall(app, app.viewB, t.c_str());
+                std::string t = std::string(_L("Waterfall")) + "###Waterfall";
+                drawWaterfall(app, app.viewA, t.c_str());
             }
-        }
-        drawAbout(app);
+            if (app.dualMode)
+            {
+                {
+                    std::string t = std::string(_L("Spectrum")) + "###Spectrum (B)";
+                    drawSpectrum(app, app.viewB, app.decodersB, t.c_str(), true, true);
+                }
+                {
+                    std::string t = std::string(_L("Waterfall")) + "###Waterfall (B)";
+                    drawWaterfall(app, app.viewB, t.c_str());
+                }
+            }
+            drawAbout(app);
 #ifdef HAS_LTE
-        drawLte(app);
-        drawLteUes(app);
-        drawLteTraffic(app);
-        drawLteCalls(app);
+            drawLte(app);
+            drawLteUes(app);
+            drawLteTraffic(app);
+            drawLteCalls(app);
 #endif
+        }
 
         int display_w, display_h;
         glfwGetFramebufferSize(window, &display_w, &display_h);
