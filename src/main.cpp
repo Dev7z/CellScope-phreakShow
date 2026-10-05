@@ -15,6 +15,7 @@
 #include "util/log.h"
 #include "version.h"
 #include "gui/waterfall.h"
+#include "gui/phreakshow.h"
 
 #include <algorithm>
 #include <chrono>
@@ -261,6 +262,7 @@ int main(int, char**)
     app.lteEngine.stop();
 #endif
 
+    shutdownPhreakShow();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImPlot::DestroyContext();

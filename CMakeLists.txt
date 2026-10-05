@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(CellScope C CXX)
+project(CellScope-phreakShow C CXX)
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 17)
@@ -118,7 +118,7 @@ endif()
 # ---------------------------------------------------------------------------
 # CellScope application
 # ---------------------------------------------------------------------------
-add_executable(CellScope
+add_executable(CellScope-phreakShow
     src/main.cpp
     src/signal/processing.cpp
     src/voice/voice_ops.cpp
@@ -143,49 +143,58 @@ add_executable(CellScope
     src/i18n/i18n.cpp
     src/update/version_check.cpp
 )
-target_include_directories(CellScope PRIVATE
+target_include_directories(CellScope-phreakShow PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${RTLSDR_INCLUDE_DIRS}
     ${HACKRF_INCLUDE_DIRS}
 )
-target_compile_definitions(CellScope PRIVATE _USE_MATH_DEFINES)
+target_compile_definitions(CellScope-phreakShow PRIVATE _USE_MATH_DEFINES)
+target_compile_definitions(CellScope-phreakShow PRIVATE
+    PHREAKSHOW_TILE_DIR="${CMAKE_SOURCE_DIR}/assets/map_tiles")
+if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+    add_custom_command(TARGET CellScope-phreakShow POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_SOURCE_DIR}/assets/map_tiles"
+                "$<TARGET_FILE_DIR:CellScope-phreakShow>/assets/map_tiles"
+        COMMENT "Copying offline map tiles")
+endif()
 if(AIRSPY_FOUND)
-    target_sources(CellScope PRIVATE src/sdr/airspy_source.cpp)
-    target_compile_definitions(CellScope PRIVATE HAS_AIRSPY=1)
-    target_include_directories(CellScope PRIVATE ${AIRSPY_INCLUDE_DIRS})
+    target_sources(CellScope-phreakShow PRIVATE src/sdr/airspy_source.cpp)
+    target_compile_definitions(CellScope-phreakShow PRIVATE HAS_AIRSPY=1)
+    target_include_directories(CellScope-phreakShow PRIVATE ${AIRSPY_INCLUDE_DIRS})
 endif()
 if(LIBRESDR_FOUND)
-    target_sources(CellScope PRIVATE src/sdr/libresdr_source.cpp)
-    target_compile_definitions(CellScope PRIVATE HAS_LIBRESDR=1)
-    target_include_directories(CellScope PRIVATE ${UHD_INCLUDE_DIRS})
-    target_link_directories(CellScope PRIVATE ${UHD_LIBRARY_DIRS})
+    target_sources(CellScope-phreakShow PRIVATE src/sdr/libresdr_source.cpp)
+    target_compile_definitions(CellScope-phreakShow PRIVATE HAS_LIBRESDR=1)
+    target_include_directories(CellScope-phreakShow PRIVATE ${UHD_INCLUDE_DIRS})
+    target_link_directories(CellScope-phreakShow PRIVATE ${UHD_LIBRARY_DIRS})
 endif()
 find_library(ZSTD_LIBRARIES NAMES zstd libzstd REQUIRED)
 find_library(ZLIB_LIB NAMES z libz zlib REQUIRED)
 
-target_link_libraries(CellScope PRIVATE imgui ${ZLIB_LIB} ${RTLSDR_LIBRARIES} ${HACKRF_LIBRARIES} ${ZSTD_LIBRARIES})
+target_link_libraries(CellScope-phreakShow PRIVATE imgui ${ZLIB_LIB} ${RTLSDR_LIBRARIES} ${HACKRF_LIBRARIES} ${ZSTD_LIBRARIES})
 if(AIRSPY_FOUND)
-    target_link_libraries(CellScope PRIVATE ${AIRSPY_LIBRARIES})
+    target_link_libraries(CellScope-phreakShow PRIVATE ${AIRSPY_LIBRARIES})
 endif()
 if(LIBRESDR_FOUND)
-    target_link_libraries(CellScope PRIVATE ${UHD_LIBRARIES})
+    target_link_libraries(CellScope-phreakShow PRIVATE ${UHD_LIBRARIES})
 endif()
 if(HAS_LTE)
-    target_link_libraries(CellScope PRIVATE cellscope_lte)
-    target_compile_definitions(CellScope PRIVATE HAS_LTE=1)
-    target_sources(CellScope PRIVATE src/lte/lte_diag.cpp)
+    target_link_libraries(CellScope-phreakShow PRIVATE cellscope_lte)
+    target_compile_definitions(CellScope-phreakShow PRIVATE HAS_LTE=1)
+    target_sources(CellScope-phreakShow PRIVATE src/lte/lte_diag.cpp)
     if(WIN32)
-        target_link_libraries(CellScope PRIVATE dbghelp psapi)
+        target_link_libraries(CellScope-phreakShow PRIVATE dbghelp psapi)
     endif()
 endif()
-target_link_directories(CellScope PRIVATE ${RTLSDR_LIBRARY_DIRS})
+target_link_directories(CellScope-phreakShow PRIVATE ${RTLSDR_LIBRARY_DIRS})
 
 if(WIN32)
-    target_link_libraries(CellScope PRIVATE opengl32 gdi32 comdlg32 ole32 winmm ws2_32 winhttp shell32)
+    target_link_libraries(CellScope-phreakShow PRIVATE opengl32 gdi32 comdlg32 ole32 winmm ws2_32 winhttp shell32)
 
     # Build as a GUI-subsystem app so no console window opens alongside the GUI.
     # MinGW provides a WinMain shim, so the existing int main() still works.
-    set_target_properties(CellScope PROPERTIES WIN32_EXECUTABLE TRUE)
+    set_target_properties(CellScope-phreakShow PROPERTIES WIN32_EXECUTABLE TRUE)
 
     # Embed the application icon (icon.ico in the project root). Windows and
     # GLFW both pick up the first icon resource for the exe and window.
@@ -193,7 +202,7 @@ if(WIN32)
         enable_language(RC)
         set(FRAMESYNC_ICON "${CMAKE_SOURCE_DIR}/icon.ico")
         configure_file("${CMAKE_SOURCE_DIR}/app.rc.in" "${CMAKE_BINARY_DIR}/app.rc" @ONLY)
-        target_sources(CellScope PRIVATE "${CMAKE_BINARY_DIR}/app.rc")
+        target_sources(CellScope-phreakShow PRIVATE "${CMAKE_BINARY_DIR}/app.rc")
     endif()
 
     # Copy MinGW runtime DLLs next to the executable so it runs standalone
@@ -218,9 +227,9 @@ if(WIN32)
     endif()
     foreach(dll ${FRAMESYNC_RUNTIME_DLLS})
         if(EXISTS "${MINGW_BIN}/${dll}")
-            add_custom_command(TARGET CellScope POST_BUILD
+            add_custom_command(TARGET CellScope-phreakShow POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "${MINGW_BIN}/${dll}" "$<TARGET_FILE_DIR:CellScope>"
+                        "${MINGW_BIN}/${dll}" "$<TARGET_FILE_DIR:CellScope-phreakShow>"
                 COMMENT "Copying ${dll}")
         else()
             message(WARNING "Runtime DLL not found: ${MINGW_BIN}/${dll}")

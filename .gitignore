@@ -1,2 +1,23 @@
 /build/
 /RESOURCES/
+
+# In-source CMake builds and binaries
+/CMakeCache.txt
+/CMakeFiles/
+/Makefile
+/cmake_install.cmake
+/CellScope-phreakShow
+/libimgui.a
+/third_party/lte/CMakeFiles/
+/third_party/lte/Makefile
+/third_party/lte/cmake_install.cmake
+/third_party/lte/*.a
+
+# Local application state, captures and generated statistics
+/cellscope.ini
+/cellscope_lte.log
+/cellscope_lte_api.pcap
+/cellscope_lte_dl.pcap
+/mcs_statistic.csv
+/ul_sample.raw
+__pycache__/

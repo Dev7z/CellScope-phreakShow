@@ -1,0 +1,39 @@
+{
+  "source": "Swiss Map Raster 200, 2025, colour without shading",
+  "attribution": "© swisstopo",
+  "bounds": [
+    5.85,
+    45.7,
+    10.6,
+    47.95
+  ],
+  "native_max_zoom": 12,
+  "source_urls": {
+    "swiss-map-raster200_2025_11_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_11/swiss-map-raster200_2025_11_komb_10_2056.tif",
+    "swiss-map-raster200_2025_12_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_12/swiss-map-raster200_2025_12_komb_10_2056.tif",
+    "swiss-map-raster200_2025_13_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_13/swiss-map-raster200_2025_13_komb_10_2056.tif",
+    "swiss-map-raster200_2025_14_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_14/swiss-map-raster200_2025_14_komb_10_2056.tif",
+    "swiss-map-raster200_2025_21_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_21/swiss-map-raster200_2025_21_komb_10_2056.tif",
+    "swiss-map-raster200_2025_22_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_22/swiss-map-raster200_2025_22_komb_10_2056.tif",
+    "swiss-map-raster200_2025_23_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_23/swiss-map-raster200_2025_23_komb_10_2056.tif",
+    "swiss-map-raster200_2025_24_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_24/swiss-map-raster200_2025_24_komb_10_2056.tif",
+    "swiss-map-raster200_2025_31_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_31/swiss-map-raster200_2025_31_komb_10_2056.tif",
+    "swiss-map-raster200_2025_32_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_32/swiss-map-raster200_2025_32_komb_10_2056.tif",
+    "swiss-map-raster200_2025_33_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_33/swiss-map-raster200_2025_33_komb_10_2056.tif",
+    "swiss-map-raster200_2025_34_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_34/swiss-map-raster200_2025_34_komb_10_2056.tif",
+    "swiss-map-raster200_2025_41_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_41/swiss-map-raster200_2025_41_komb_10_2056.tif",
+    "swiss-map-raster200_2025_42_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_42/swiss-map-raster200_2025_42_komb_10_2056.tif",
+    "swiss-map-raster200_2025_43_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_43/swiss-map-raster200_2025_43_komb_10_2056.tif",
+    "swiss-map-raster200_2025_44_komb_10_2056.tif": "https://data.geo.admin.ch/ch.swisstopo.pixelkarte-farbe-pk200.noscale/swiss-map-raster200_2025_44/swiss-map-raster200_2025_44_komb_10_2056.tif"
+  },
+  "tiles_per_zoom": {
+    "5": 1,
+    "6": 1,
+    "7": 4,
+    "8": 12,
+    "9": 40,
+    "10": 150,
+    "11": 560,
+    "12": 2145
+  }
+}
