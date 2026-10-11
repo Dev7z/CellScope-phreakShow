@@ -1835,6 +1835,13 @@ void drawLteCalls(App& app)
 // layout via a custom settings handler.
 // ---------------------------------------------------------------------------
 
+bool isFloatingPanel(const char* name)
+{
+    const auto* window = ImGui::FindWindowByName(name);
+    return window && (window->DockId == 0 || (window->DockNode &&
+        !ImGui::DockNodeGetRootNode(window->DockNode)->IsDockSpace()));
+}
+
 bool drawDockHost(App& app)
 {
     // The default dock layout is a baked-in ImGui .ini loaded from main() (on
@@ -1857,29 +1864,21 @@ bool drawDockHost(App& app)
     ImGui::Begin("##CellScopeHost", nullptr, hostFlags);
     ImGui::PopStyleVar(3);
 
-    ImGuiID dockId = ImGui::GetID("CellScopeDockSpace");
-    bool showCellScope = false;
-    if (ImGui::BeginTabBar("ApplicationTabs"))
+    // Retain the original CellScope dock ID so its existing panel layout works
+    // inside the new workspace window. Workspaces themselves are real dock tabs.
+    const ImGuiID dockId = ImGui::GetID("CellScopeDockSpace");
+    const ImGuiID workspaceDock = ImGui::GetID("ApplicationDockSpace");
+    if (!ImGui::DockBuilderGetNode(workspaceDock))
     {
-        if (ImGui::BeginTabItem("CellScope"))
-        {
-            showCellScope = true;
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("phreakShow"))
-        {
-            drawPhreakShow();
-            ImGui::EndTabItem();
-        }
-        ImGui::EndTabBar();
+        ImGui::DockBuilderAddNode(workspaceDock, ImGuiDockNodeFlags_DockSpace);
+        ImGui::DockBuilderSetNodeSize(workspaceDock, vp->WorkSize);
+        ImGui::DockBuilderDockWindow("CellScope###CellScopeWorkspace", workspaceDock);
+        ImGui::DockBuilderDockWindow("phreakShow###PhreakShowWorkspace", workspaceDock);
+        ImGui::DockBuilderFinish(workspaceDock);
     }
-    // Inactive dockspaces must stay alive to preserve their window assignments.
-    if (showCellScope)
-        ImGui::DockSpace(dockId, ImVec2(0, 0), ImGuiDockNodeFlags_NoUndocking);
-    else
-        ImGui::DockSpace(dockId, ImVec2(0, 0), ImGuiDockNodeFlags_KeepAliveOnly);
+    ImGui::DockSpace(workspaceDock, ImVec2(0, 0));
 
-    if (showCellScope && ImGui::BeginMenuBar())
+    if (ImGui::BeginMenuBar())
     {
         if (ImGui::BeginMenu(_L("View")))
         {
@@ -1900,6 +1899,13 @@ bool drawDockHost(App& app)
     }
 
     ImGui::End();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    const bool showCellScope = ImGui::Begin("CellScope###CellScopeWorkspace", nullptr,
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleVar();
+    ImGui::DockSpace(dockId, ImVec2(0, 0), showCellScope ? 0 : ImGuiDockNodeFlags_KeepAliveOnly);
+    ImGui::End();
+    drawPhreakShow(app);
     return showCellScope;
 }
 

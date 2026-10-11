@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <vector>
 
 namespace phreakshow {
@@ -20,10 +21,16 @@ extern std::vector<MapPoint> mapPoints;
 // Returns false for non-finite or out-of-range coordinates.
 bool addMapPoint(double longitude, double latitude,
                  MapProvider provider = MapProvider::Unspecified);
+inline bool validMapCoordinates(double longitude, double latitude) {
+    return std::isfinite(longitude) && std::isfinite(latitude) &&
+           longitude >= -180.0 && longitude <= 180.0 &&
+           latitude >= -90.0 && latitude <= 90.0;
+}
 } // namespace phreakshow
 
 // Draw the contents of the phreakShow application tab.
-void drawPhreakShow();
+struct App;
+void drawPhreakShow(App& app);
 
 // Release map textures while the OpenGL context is still current.
 void shutdownPhreakShow();

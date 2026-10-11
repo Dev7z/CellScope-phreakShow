@@ -13,6 +13,14 @@ endif()
 # Dependencies
 # ---------------------------------------------------------------------------
 find_package(OpenGL REQUIRED)
+find_package(SQLite3 REQUIRED)
+if(TARGET SQLite3::SQLite3)
+    set(PHREAKSHOW_SQLITE_TARGET SQLite3::SQLite3)
+else()
+    set(PHREAKSHOW_SQLITE_TARGET SQLite::SQLite3)
+endif()
+find_package(CURL REQUIRED)
+find_package(JPEG REQUIRED)
 find_package(PkgConfig)
 
 find_package(glfw3 CONFIG QUIET)
@@ -124,6 +132,9 @@ add_executable(CellScope-phreakShow
     src/voice/voice_ops.cpp
     src/gui/gui_panels.cpp
     src/gui/phreakshow.cpp
+    src/gui/map_view.cpp
+    src/gui/map_tiles.cpp
+    src/gui/antenna_database.cpp
     src/session/session.cpp
     src/state/config.cpp
     src/sdr/rtl_sdr_source.cpp
@@ -150,13 +161,21 @@ target_include_directories(CellScope-phreakShow PRIVATE
 )
 target_compile_definitions(CellScope-phreakShow PRIVATE _USE_MATH_DEFINES)
 target_compile_definitions(CellScope-phreakShow PRIVATE
-    PHREAKSHOW_TILE_DIR="${CMAKE_SOURCE_DIR}/assets/map_tiles")
+    PHREAKSHOW_TILE_DIR="${CMAKE_SOURCE_DIR}/assets/map_tiles"
+    PHREAKSHOW_DATABASE_PATH="${CMAKE_SOURCE_DIR}/switzerland.db")
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
     add_custom_command(TARGET CellScope-phreakShow POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_SOURCE_DIR}/assets/map_tiles"
                 "$<TARGET_FILE_DIR:CellScope-phreakShow>/assets/map_tiles"
         COMMENT "Copying offline map tiles")
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/switzerland.db" AND NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+    add_custom_command(TARGET CellScope-phreakShow POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/switzerland.db"
+                "$<TARGET_FILE_DIR:CellScope-phreakShow>/switzerland.db"
+        COMMENT "Copying antenna database")
 endif()
 if(AIRSPY_FOUND)
     target_sources(CellScope-phreakShow PRIVATE src/sdr/airspy_source.cpp)
@@ -172,9 +191,28 @@ endif()
 find_library(ZSTD_LIBRARIES NAMES zstd libzstd REQUIRED)
 find_library(ZLIB_LIB NAMES z libz zlib REQUIRED)
 
-target_link_libraries(CellScope-phreakShow PRIVATE imgui ${ZLIB_LIB} ${RTLSDR_LIBRARIES} ${HACKRF_LIBRARIES} ${ZSTD_LIBRARIES})
+target_link_libraries(CellScope-phreakShow PRIVATE imgui ${PHREAKSHOW_SQLITE_TARGET} CURL::libcurl JPEG::JPEG
+    ${ZLIB_LIB} ${RTLSDR_LIBRARIES} ${HACKRF_LIBRARIES} ${ZSTD_LIBRARIES})
 if(AIRSPY_FOUND)
     target_link_libraries(CellScope-phreakShow PRIVATE ${AIRSPY_LIBRARIES})
+endif()
+
+# Small map/database checks do not require a graphics context or SDR hardware.
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(map_projection_selftest tools/map_projection_selftest.cpp)
+    target_include_directories(map_projection_selftest PRIVATE src)
+    add_executable(antenna_database_selftest tools/antenna_database_selftest.cpp src/gui/antenna_database.cpp)
+    target_include_directories(antenna_database_selftest PRIVATE src)
+    target_link_libraries(antenna_database_selftest PRIVATE ${PHREAKSHOW_SQLITE_TARGET})
+    foreach(test_target map_projection_selftest antenna_database_selftest)
+        if(MSVC)
+            target_compile_options(${test_target} PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(${test_target} PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME ${test_target} COMMAND ${test_target})
+    endforeach()
 endif()
 if(LIBRESDR_FOUND)
     target_link_libraries(CellScope-phreakShow PRIVATE ${UHD_LIBRARIES})
@@ -218,6 +256,9 @@ if(WIN32)
         libusb-1.0.dll
         libzstd.dll
         zlib1.dll
+        libsqlite3-0.dll
+        libcurl-4.dll
+        libjpeg-8.dll
     )
     if(AIRSPY_FOUND)
         list(APPEND FRAMESYNC_RUNTIME_DLLS libairspy.dll)

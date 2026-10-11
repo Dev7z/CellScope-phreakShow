@@ -20,8 +20,10 @@ void retunePreserving(App&, double centerMHz);
 void startActive(App&);
 
 // gui/gui_panels.cpp
-// Returns true when the CellScope tab is selected.
+// Draw dockable application workspaces. Returns true when CellScope is visible.
 bool drawDockHost(App&);
+// Floating panels remain available while their workspace is inactive.
+bool isFloatingPanel(const char* name);
 void drawControls(App&);
 void drawSpectrum(App&, SpectrumView&, DecoderManager&, const char*, bool, bool);
 void drawWaterfall(App&, SpectrumView&, const char*);

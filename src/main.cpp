@@ -72,8 +72,23 @@ static void glfw_error_callback(int error, const char* description)
 int main(int, char**)
 {
     glfwSetErrorCallback(glfw_error_callback);
+    // ImGui's GLFW backend cannot create platform viewports on native Wayland.
+    // Prefer X11/XWayland when available so tabs can become separate windows.
+#if defined(__linux__) && defined(GLFW_PLATFORM)
+    const char* display = std::getenv("DISPLAY");
+    const bool preferX11 = display && *display && glfwPlatformSupported(GLFW_PLATFORM_X11);
+    if (preferX11) glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#endif
     if (!glfwInit())
+    {
+#if defined(__linux__) && defined(GLFW_PLATFORM)
+        if (preferX11) {
+            glfwInitHint(GLFW_PLATFORM, GLFW_ANY_PLATFORM);
+            if (!glfwInit()) return 1;
+        } else
+#endif
         return 1;
+    }
 
     const char* glsl_version = "#version 130";
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -93,6 +108,7 @@ int main(int, char**)
     ImPlot::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
     App app;
@@ -125,6 +141,8 @@ int main(int, char**)
             io.Fonts->AddFontDefault(); // fallback to built-in ProggyClean
     }
     ImGui::GetStyle().ScaleAllSizes((float)app.fontSize / 13.0f);
+    ImGui::GetStyle().WindowRounding = 0;
+    ImGui::GetStyle().Colors[ImGuiCol_WindowBg].w = 1;
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
@@ -202,34 +220,37 @@ int main(int, char**)
                     app.savedDecodersB.push_back({st.freqMHz, st.baud});
         }
 
-        if (showCellScope)
+        // Submit floating panels on inactive workspaces; docked panels stay
+        // attached through KeepAliveOnly without overlaying the active tab.
         {
-            drawControls(app);
+            if (showCellScope || isFloatingPanel("Control")) drawControls(app);
             {
                 std::string t = std::string(_L("Spectrum")) + "###Spectrum";
-                drawSpectrum(app, app.viewA, app.decoders, t.c_str(), true, false);
+                if (showCellScope || isFloatingPanel(t.c_str()))
+                    drawSpectrum(app, app.viewA, app.decoders, t.c_str(), true, false);
             }
             {
                 std::string t = std::string(_L("Waterfall")) + "###Waterfall";
-                drawWaterfall(app, app.viewA, t.c_str());
+                if (showCellScope || isFloatingPanel(t.c_str())) drawWaterfall(app, app.viewA, t.c_str());
             }
             if (app.dualMode)
             {
                 {
                     std::string t = std::string(_L("Spectrum")) + "###Spectrum (B)";
-                    drawSpectrum(app, app.viewB, app.decodersB, t.c_str(), true, true);
+                    if (showCellScope || isFloatingPanel(t.c_str()))
+                        drawSpectrum(app, app.viewB, app.decodersB, t.c_str(), true, true);
                 }
                 {
                     std::string t = std::string(_L("Waterfall")) + "###Waterfall (B)";
-                    drawWaterfall(app, app.viewB, t.c_str());
+                    if (showCellScope || isFloatingPanel(t.c_str())) drawWaterfall(app, app.viewB, t.c_str());
                 }
             }
             drawAbout(app);
 #ifdef HAS_LTE
-            drawLte(app);
-            drawLteUes(app);
-            drawLteTraffic(app);
-            drawLteCalls(app);
+            if (showCellScope || isFloatingPanel("LTE")) drawLte(app);
+            if (showCellScope || isFloatingPanel("UEs")) drawLteUes(app);
+            if (showCellScope || isFloatingPanel("Traffic")) drawLteTraffic(app);
+            if (showCellScope || isFloatingPanel("Calls")) drawLteCalls(app);
 #endif
         }
 
@@ -241,6 +262,14 @@ int main(int, char**)
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+        {
+            GLFWwindow* previous = glfwGetCurrentContext();
+            ImGui::UpdatePlatformWindows();
+            ImGui::RenderPlatformWindowsDefault();
+            glfwMakeContextCurrent(previous);
+        }
 
         glfwSwapBuffers(window);
     }

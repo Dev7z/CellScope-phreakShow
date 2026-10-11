@@ -39,6 +39,12 @@ pacman -S --needed \
   mingw-w64-x86_64-fftw
 ```
 
+The phreakShow antenna map also needs SQLite, curl and JPEG decoding:
+
+```bash
+pacman -S --needed mingw-w64-x86_64-sqlite3 mingw-w64-x86_64-curl mingw-w64-x86_64-libjpeg-turbo
+```
+
 These provide: GCC/G++, CMake, Ninja, pkg-config, GLFW (windowing), librtlsdr +
 libusb (RTL-SDR), HackRF, and zstd (SDR++ server compression). OpenGL and zlib
 ship with the toolchain. libogg + libvorbis provide OGG Vorbis voice recording.
@@ -130,4 +136,79 @@ keeps the current directory.
 - **Clean rebuild.** Delete the `build/` directory and re-run the configure +
   build steps. (Avoid `--clean-first`; it wipes the vendored objects and forces
   the slow `implot_items.cpp` recompile.)
+
+## phreakShow map
+
+Place `switzerland.db` in the project root before building, or beside the
+executable afterwards. The build copies it beside the executable when present.
+The map opens it read-only; it never adds indexes or changes records. You can
+also enter a different database path under **Your coordinates / database**.
+
+Select the **phreakShow** workspace. Below zoom 14, each visible coordinate gets
+one mast marker if any antenna there belongs to an enabled company. Sunrise is
+red, Swisscom blue, Salt green, and shared masts white. At zoom 14 and above,
+each enabled antenna gets a direction line: 0 degrees points north, 90 east.
+Line length is fixed and indicates direction, not predicted coverage.
+
+**Basel SBB** centers the map on the station at zoom 13. Expand **Your coordinates
+/ database**, enter WGS84 longitude and latitude, and press **Set user point**.
+Your point is cyan. **Go to user (zoom 13)** centers the map on that saved point.
+This also enables distance searches in **Nearby antennas / tuning**.
+
+Click a mast or direction line to select an antenna. When several antennas
+overlap, choose a row in the picker. **Antenna details** shows every database
+field and the other antennas at the same exact coordinates. Selecting a hidden
+company's antenna enables that company's checkbox. Selection is highlighted in
+yellow. **Show selected on map** centers it at zoom 14.
+
+The nearby panel searches either **K nearest antennas** or **All within radius**
+(kilometers). It honors company checkboxes, retains separate antenna records at
+the same mast, and sorts by great-circle distance from your saved coordinates.
+Selecting a row updates the same map selection and details. **Set CellScope
+center to selected antenna** transfers its exact MHz value to the primary radio;
+existing decoders are preserved. For WAV sources it changes the frequency label.
+
+**Satellite / aerial** is available at zoom 13 and above. It downloads official
+swisstopo SWISSIMAGE aerial tiles on a background thread and stores them in
+`assets/satellite_cache` beside the executable. Previously cached tiles work
+offline. Until imagery is ready, or outside available imagery, the offline map
+is shown. **Retry aerial tiles** retries failed requests. Service documentation:
+<https://docs.geo.admin.ch/visualize-data/xyz.html>.
+
+Drag the CellScope or phreakShow workspace tabs to reorder, split or detach
+them. The three phreakShow panel tabs can also be moved independently. On
+platforms where GLFW supports multiple viewports, dragging outside the app
+creates a native window. **View > Reset Layout** restores the default arrangement.
+Window arrangements are saved in `cellscope.ini`.
+On Linux the app prefers X11/XWayland when available, because ImGui's GLFW
+backend currently disables native multi-window viewports on Wayland.
+
+### Where to change things
+
+- `src/gui/antenna_database.*`: SQLite loading, exact coordinate grouping,
+  distance calculations, viewport filtering, and nearest/radius queries.
+- `src/gui/map_view.cpp`: map controls, projection, antenna direction lines,
+  hit testing and highlights. `sectorLength` controls line length in pixels.
+- `src/gui/map_tiles.*`: offline tile loading, aerial downloads, JPEG decoding,
+  disk caching and OpenGL texture lifetime.
+- `src/gui/phreakshow.cpp`: workspace arrangement, details/nearby tables and
+  CellScope frequency handoff.
+- `src/gui/phreakshow_state.h`: internal state shared by the canvas and panels.
+- `src/gui/phreakshow.h`: public `mapPoints` list and `addMapPoint()` API.
+
+External functions can still add their own points on the UI thread:
+
+```cpp
+#include "gui/phreakshow.h"
+phreakshow::addMapPoint(8.393766, 46.827407, phreakshow::MapProvider::Sunrise);
+// Manage these custom points without modifying antenna database records:
+phreakshow::mapPoints.clear();
+```
+
+After building, run the map and database tests with:
+
+```bash
+ctest --test-dir build --output-on-failure
+# Validate this supplied database snapshot (244823 antennas / 20259 masts):
+./build/antenna_database_selftest switzerland.db
 ```

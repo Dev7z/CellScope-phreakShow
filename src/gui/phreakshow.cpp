@@ -1,299 +1,218 @@
 #include "gui/phreakshow.h"
-#include "gui/map_projection.h"
-#include "imgui.h"
-
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
-#include <GL/gl.h>
-#include <zlib.h>
-
+#include "gui/phreakshow_state.h"
+#include "core/main_funcs.h"
+#include "imgui_internal.h"
 #include <algorithm>
-#include <filesystem>
-#include <fstream>
-#include <map>
-#include <string>
-#include <vector>
-
-#ifndef GL_CLAMP_TO_EDGE
-#define GL_CLAMP_TO_EDGE 0x812F
-#endif
+#include <cstdio>
 
 namespace phreakshow {
-    std::vector<MapPoint> mapPoints;
+std::vector<MapPoint> mapPoints;
+bool addMapPoint(double longitude, double latitude, MapProvider provider) {
+    if (!validMapCoordinates(longitude, latitude)) return false;
+    mapPoints.push_back({longitude, latitude, provider});
+    return true;
+}
 
-    namespace {
-        bool validCoordinates(double longitude, double latitude) {
-            return std::isfinite(longitude) && std::isfinite(latitude) &&
-                   longitude >= -180.0 && longitude <= 180.0 &&
-                   latitude >= -90.0 && latitude <= 90.0;
+namespace detail {
+ShowState& state() {
+    static ShowState value;
+    return value;
+}
+
+void drawAntennaRows(ShowState& s, const char* id, const std::vector<NearbyAntenna>& rows,
+                    bool showDistance, float height) {
+    const int columns = showDistance ? 7 : 6;
+    const float scale = ImGui::GetFontSize() / 13.0f;
+    if (!ImGui::BeginTable(id, columns, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                          ImGuiTableFlags_ScrollY | ImGuiTableFlags_ScrollX | ImGuiTableFlags_Resizable,
+                          ImVec2(0, height), (showDistance ? 535.0f : 475.0f) * scale)) return;
+    ImGui::TableSetupScrollFreeze(1, 1);
+    ImGui::TableSetupColumn("Company", ImGuiTableColumnFlags_WidthFixed, 80 * scale);
+    ImGui::TableSetupColumn("MHz", ImGuiTableColumnFlags_WidthFixed, 75 * scale);
+    ImGui::TableSetupColumn("PCI", ImGuiTableColumnFlags_WidthFixed, 42 * scale);
+    ImGui::TableSetupColumn("Site ID", ImGuiTableColumnFlags_WidthFixed, 60 * scale);
+    ImGui::TableSetupColumn("Azimuth", ImGuiTableColumnFlags_WidthFixed, 60 * scale);
+    if (showDistance) ImGui::TableSetupColumn("km", ImGuiTableColumnFlags_WidthFixed, 60 * scale);
+    ImGui::TableSetupColumn("Antenna ID", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableHeadersRow();
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(rows.size()));
+    while (clipper.Step()) {
+        for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+            const auto index = rows[row].antenna;
+            const auto& a = s.database.antennas()[index];
+            ImGui::PushID(static_cast<int>(index));
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            if (ImGui::Selectable(providerName(a.provider), s.selected == index,
+                                  ImGuiSelectableFlags_SpanAllColumns)) s.select(index);
+            ImGui::TableNextColumn();
+            if (a.frequencyMHz > 0) ImGui::Text("%.4f", a.frequencyMHz);
+            else ImGui::TextUnformatted("--");
+            ImGui::TableNextColumn();
+            if (a.pci >= 0) ImGui::Text("%lld", static_cast<long long>(a.pci));
+            else ImGui::TextUnformatted("--");
+            ImGui::TableNextColumn();
+            if (a.siteId >= 0) ImGui::Text("%lld", static_cast<long long>(a.siteId));
+            else ImGui::TextUnformatted("--");
+            ImGui::TableNextColumn();
+            if (std::isfinite(a.azimuth)) ImGui::Text("%.0f deg", a.azimuth);
+            else ImGui::TextUnformatted("--");
+            if (showDistance) {
+                ImGui::TableNextColumn();
+                ImGui::Text("%.3f", rows[row].distanceKm);
+            }
+            ImGui::TableNextColumn();
+            ImGui::Text("%lld", static_cast<long long>(a.id));
+            ImGui::PopID();
         }
     }
+    ImGui::EndTable();
+}
 
-    bool addMapPoint(double longitude, double latitude, MapProvider provider) {
-        if (!validCoordinates(longitude, latitude)) return false;
-        mapPoints.push_back({longitude, latitude, provider});
-        return true;
+void loadDatabase(ShowState& s) {
+    s.selected = noAntenna;
+    s.selectedFields.clear();
+    s.pickCandidates.clear();
+    s.nearby.clear();
+    s.nearestDirty = true;
+    s.tuneStatus.clear();
+    s.database.open(std::filesystem::u8path(s.databasePath));
+}
+
+void locateDatabase(ShowState& s) {
+    if (s.databaseLocated) return;
+    s.databaseLocated = true;
+    for (const auto& path : {executableDirectory() / "switzerland.db",
+                             std::filesystem::path("switzerland.db"),
+                             std::filesystem::path(PHREAKSHOW_DATABASE_PATH)}) {
+        if (std::filesystem::exists(path)) {
+            std::snprintf(s.databasePath, sizeof(s.databasePath), "%s", path.u8string().c_str());
+            break;
+        }
     }
+    loadDatabase(s);
+}
+
+void drawDetails(ShowState& s) {
+    if (!ImGui::Begin("Antenna details###PhreakShowDetails")) { ImGui::End(); return; }
+    if (s.selected == noAntenna) {
+        ImGui::TextWrapped("Click a mast, antenna direction line, or a row in Nearby antennas.");
+        ImGui::End();
+        return;
+    }
+    const auto& a = s.database.antennas()[s.selected];
+    const auto& mast = s.database.masts()[a.mast];
+    ImGui::Text("Antenna %lld | %s", static_cast<long long>(a.id), providerName(a.provider));
+    if (ImGui::Button("Show selected on map")) s.center(mast.longitude, mast.latitude, 14);
+    ImGui::Text("At this location: %zu antennas", mast.antennas.size());
+    ImGui::TextDisabled("Selecting a hidden company enables its checkbox.");
+    std::vector<NearbyAntenna> colocated;
+    for (auto index : mast.antennas) colocated.push_back({index, 0});
+    drawAntennaRows(s, "colocated", colocated, false, ImGui::GetTextLineHeightWithSpacing() * 7);
+    ImGui::SeparatorText("All database fields");
+    if (ImGui::BeginTable("antenna_fields", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                          ImGuiTableFlags_Resizable)) {
+        ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 15);
+        ImGui::TableSetupColumn("Value");
+        for (const auto& field : s.selectedFields) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextWrapped("%s", field.first.c_str());
+            ImGui::TableNextColumn();
+            ImGui::TextWrapped("%s", field.second.c_str());
+        }
+        ImGui::EndTable();
+    }
+    ImGui::End();
+}
+
+void drawNearby(ShowState& s, App& app) {
+    if (!ImGui::Begin("Nearby antennas / tuning###PhreakShowNearby")) { ImGui::End(); return; }
+    ImGui::Text("CellScope center: %.4f MHz", app.centerFreqMHz);
+    const auto* antenna = s.selected == noAntenna ? nullptr : &s.database.antennas()[s.selected];
+    if (antenna) ImGui::Text("Selected: %s, %.4f MHz, PCI %lld", providerName(antenna->provider),
+                             antenna->frequencyMHz, static_cast<long long>(antenna->pci));
+    ImGui::BeginDisabled(!antenna || antenna->frequencyMHz <= 0);
+    if (ImGui::Button("Set CellScope center to selected antenna")) {
+        if (app.active->running()) {
+            retunePreserving(app, antenna->frequencyMHz);
+            if (app.sourceMode == 1) app.wav.setCenterFreq(antenna->frequencyMHz * 1e6);
+        } else app.centerFreqMHz = antenna->frequencyMHz;
+        app.viewA.resetView = true;
+        s.tuneStatus = "CellScope center set to " + std::to_string(antenna->frequencyMHz) + " MHz.";
+        if (app.sourceMode == 1) s.tuneStatus += " WAV frequency label updated.";
+    }
+    ImGui::EndDisabled();
+    if (!s.tuneStatus.empty()) ImGui::TextWrapped("%s", s.tuneStatus.c_str());
+    ImGui::SeparatorText("From your coordinates");
+    if (!s.userPositionSet) {
+        ImGui::TextWrapped("Enter longitude and latitude in Map, then click Set user point.");
+        ImGui::End();
+        return;
+    }
+    ImGui::Text("Longitude %.6f | Latitude %.6f", s.userLongitude, s.userLatitude);
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 15);
+    if (ImGui::Combo("Search", &s.nearestMode, "K nearest antennas\0All within radius\0")) s.nearestDirty = true;
+    if (s.nearestMode == 0) {
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
+        if (ImGui::InputInt("K", &s.nearestCount)) {
+            s.nearestCount = std::clamp(s.nearestCount, 1, std::max(1, static_cast<int>(s.database.antennas().size())));
+            s.nearestDirty = true;
+        }
+    } else {
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
+        if (ImGui::InputDouble("Radius (km)", &s.radiusKm, 0.1, 1, "%.3f")) {
+            if (!std::isfinite(s.radiusKm)) s.radiusKm = 2;
+            s.radiusKm = std::clamp(s.radiusKm, 0.0, 40075.0);
+            s.nearestDirty = true;
+        }
+    }
+    if (s.nearestDirty) {
+        s.nearby = s.database.nearest(s.userLongitude, s.userLatitude, s.providerMask(),
+                    s.nearestMode == 0 ? s.nearestCount : 0,
+                    s.nearestMode == 0 ? std::numeric_limits<double>::infinity() : s.radiusKm);
+        s.nearestDirty = false;
+    }
+    ImGui::Text("%zu antennas | company checkboxes apply", s.nearby.size());
+    if (s.nearby.empty()) ImGui::TextUnformatted("No antennas match this search.");
+    else drawAntennaRows(s, "nearest_antennas", s.nearby, true);
+    ImGui::End();
+}
+} // namespace detail
 } // namespace phreakshow
 
-namespace {
-    constexpr int tileSize = 256;
-    constexpr int maxZoom = 16;
-    constexpr int swissTileZoom = 12;
-    struct CachedTile {
-        GLuint texture = 0;
-        int lastFrame = 0;
-    };
-    struct TileImage {
-        GLuint texture = 0;
-        ImVec2 uv0{0, 0};
-        ImVec2 uv1{1, 1};
-        int sourceZoom = 0;
-    };
-    struct MapState {
-        double x = 0.5 + 8.13 / 360.0;
-        double y = phreakshow::mercatorY(46.8);
-        int zoom = 8;
-        std::map<std::string, CachedTile> textures;
-        std::filesystem::path root;
-        bool located = false;
-
-        void locate() {
-            if (located) return;
-            located = true;
-            // Executable-relative resources allow launching from an arbitrary cwd.
-            std::error_code ec;
-            const auto exe = std::filesystem::read_symlink("/proc/self/exe", ec);
-    #if defined(_WIN32)
-            wchar_t path[32768]{};
-            const DWORD length = GetModuleFileNameW(nullptr, path, 32768);
-            const auto exeDir = length && length < 32768
-                ? std::filesystem::path(path).parent_path() : std::filesystem::path{};
-    #else
-            const auto exeDir = ec ? std::filesystem::path{} : exe.parent_path();
-    #endif
-            for (const auto& candidate : {exeDir / "assets/map_tiles",
-                                         std::filesystem::path("assets/map_tiles"),
-                                         std::filesystem::path(PHREAKSHOW_TILE_DIR)}) {
-                if (std::filesystem::exists(candidate / "0/0/0.rgb.z")) {
-                    root = candidate;
-                    return;
-                }
-            }
-        }
-
-        GLuint tile(int z, int tx, int ty) {
-            const std::string key = std::to_string(z) + "/" + std::to_string(tx) + "/" + std::to_string(ty) + ".rgb.z";
-            const auto found = textures.find(key);
-            if (found != textures.end()) {
-                found->second.lastFrame = ImGui::GetFrameCount();
-                return found->second.texture;
-            }
-            GLuint texture = 0;
-            std::ifstream file(root / key, std::ios::binary | std::ios::ate);
-            if (file) {
-                const auto size = file.tellg();
-                // Bound reads and decoded size even if a local tile is corrupted.
-                if (size > 0 && size <= 1024 * 1024) {
-                    std::vector<unsigned char> compressed(static_cast<size_t>(size));
-                    std::vector<unsigned char> pixels(tileSize * tileSize * 3);
-                    file.seekg(0);
-                    file.read(reinterpret_cast<char*>(compressed.data()), compressed.size());
-                    uLongf decoded = pixels.size();
-                    if (file && uncompress(pixels.data(), &decoded, compressed.data(), compressed.size()) == Z_OK && decoded == pixels.size()) {
-                        GLint previousTexture = 0, alignment = 4;
-                        glGetIntegerv(GL_TEXTURE_BINDING_2D, &previousTexture);
-                        glGetIntegerv(GL_UNPACK_ALIGNMENT, &alignment);
-                        glGenTextures(1, &texture);
-                        glBindTexture(GL_TEXTURE_2D, texture);
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-                        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-                        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, tileSize, tileSize, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
-                        glPixelStorei(GL_UNPACK_ALIGNMENT, alignment);
-                        glBindTexture(GL_TEXTURE_2D, previousTexture);
-                    }
-                }
-            }
-            textures.emplace(key, CachedTile{texture, ImGui::GetFrameCount()});
-            return texture;
-        }
-
-        TileImage image(int z, int tx, int ty) {
-            // Missing regional tiles reuse the appropriate portion of their parent.
-            // This also allows zooming beyond the native Swiss raster resolution.
-            for (int sourceZoom = std::min(z, swissTileZoom); sourceZoom >= 0; --sourceZoom) {
-                const int factor = 1 << (z - sourceZoom);
-                const GLuint texture = tile(sourceZoom, tx / factor, ty / factor);
-                if (texture) {
-                    const float u = static_cast<float>(tx % factor) / factor;
-                    const float v = static_cast<float>(ty % factor) / factor;
-                    const float span = 1.0f / factor;
-                    return {texture, ImVec2(u, v), ImVec2(u + span, v + span), sourceZoom};
-                }
-            }
-            return {};
-        }
-
-        void trimCache() {
-            // Never delete a texture referenced by the previous frame's draw data.
-            // Keep GPU memory bounded as the user pans across the regional tiles.
-            if (textures.size() <= 512) return;
-            const int cutoff = ImGui::GetFrameCount() - 1;
-            for (auto it = textures.begin(); it != textures.end() && textures.size() > 256;) {
-                if (it->second.lastFrame < cutoff) {
-                    if (it->second.texture) glDeleteTextures(1, &it->second.texture);
-                    it = textures.erase(it);
-                } else ++it;
-            }
-        }
-    };
-    MapState map;
-    bool showSunrise = true;
-    bool showSwisscom = true;
-    bool showSalt = true;
-
-    void drawMapPoint(ImDrawList* draw, const phreakshow::MapPoint& point, const ImVec2& origin, const ImVec2& size, double left, double top, double world) {
-        // Direct edits of the public list must not feed invalid values to ImGui.
-        if (!phreakshow::validCoordinates(point.longitude, point.latitude)) return;
-        ImU32 color = IM_COL32(255, 210, 90, 255);
-        switch (point.provider) {
-        case phreakshow::MapProvider::Sunrise:
-            if (!showSunrise) return;
-            color = IM_COL32(235, 75, 90, 255);
-            break;
-        case phreakshow::MapProvider::Swisscom:
-            if (!showSwisscom) return;
-            color = IM_COL32(65, 145, 255, 255);
-            break;
-        case phreakshow::MapProvider::Salt:
-            if (!showSalt) return;
-            color = IM_COL32(100, 215, 125, 255);
-            break;
-        case phreakshow::MapProvider::Unspecified:
-            break;
-        }
-        constexpr float radius = 5.0f;
-        const double y = phreakshow::mercatorY(point.latitude) * world - top;
-        if (y < -radius || y > size.y + radius) return;
-        const double x = phreakshow::wrapX(0.5 + point.longitude / 360.0) * world;
-        // Repeat markers with the tiles when the viewport crosses the date line
-        // or is wider than the world at low zoom levels.
-        const double first = std::ceil((left - radius - x) / world);
-        const double last = std::floor((left + size.x + radius - x) / world);
-        for (double copy = first; copy <= last; copy += 1.0) {
-            const ImVec2 position(origin.x + static_cast<float>(x + copy * world - left),
-                                  origin.y + static_cast<float>(y));
-            draw->AddCircleFilled(position, radius, color);
-            draw->AddCircle(position, radius, IM_COL32(20, 25, 30, 255), 0, 1.5f);
-        }
+void drawPhreakShow(App& app) {
+    using namespace phreakshow::detail;
+    auto& s = state();
+    locateDatabase(s);
+    s.tiles.beginFrame();
+    const bool visible = ImGui::Begin("phreakShow###PhreakShowWorkspace", nullptr,
+                                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    const ImGuiID dock = ImGui::GetID("PhreakShowDockSpace");
+    if (!ImGui::DockBuilderGetNode(dock)) {
+        ImGui::DockBuilderAddNode(dock, ImGuiDockNodeFlags_DockSpace);
+        ImGui::DockBuilderSetNodeSize(dock, ImGui::GetContentRegionAvail());
+        ImGuiID map = dock, right;
+        ImGui::DockBuilderSplitNode(map, ImGuiDir_Right, 0.38f, &right, &map);
+        ImGuiID details, nearby;
+        ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.48f, &nearby, &details);
+        ImGui::DockBuilderDockWindow("Map###PhreakShowMap", map);
+        ImGui::DockBuilderDockWindow("Antenna details###PhreakShowDetails", details);
+        ImGui::DockBuilderDockWindow("Nearby antennas / tuning###PhreakShowNearby", nearby);
+        ImGui::DockBuilderFinish(dock);
     }
+    ImGui::DockSpace(dock, ImVec2(0, 0), visible ? 0 : ImGuiDockNodeFlags_KeepAliveOnly);
+    ImGui::End();
+    if (visible || isFloatingPanel("Map###PhreakShowMap")) {
+        if (ImGui::Begin("Map###PhreakShowMap")) drawMapCanvas(s);
+        ImGui::End();
+    }
+    if (visible || isFloatingPanel("Antenna details###PhreakShowDetails")) drawDetails(s);
+    if (visible || isFloatingPanel("Nearby antennas / tuning###PhreakShowNearby")) drawNearby(s, app);
 }
 
 void shutdownPhreakShow() {
-    for (const auto& entry : map.textures)
-        if (entry.second.texture) glDeleteTextures(1, &entry.second.texture);
-    map.textures.clear();
-}
-
-void drawPhreakShow() {
-    map.locate();
-    map.trimCache();
-    ImGui::TextUnformatted("Offline map  |  Drag to pan, scroll to zoom");
-    auto zoomAt = [](int next, double offsetX, double offsetY) {
-        next = std::clamp(next, 0, maxZoom);
-        const double before = tileSize * (1 << map.zoom);
-        const double after = tileSize * (1 << next);
-        map.x += offsetX / before - offsetX / after;
-        map.y += offsetY / before - offsetY / after;
-        map.zoom = next;
-    };
-    if (ImGui::Button("+")) zoomAt(map.zoom + 1, 0, 0);
-    ImGui::SameLine();
-    if (ImGui::Button("-")) zoomAt(map.zoom - 1, 0, 0);
-    ImGui::SameLine();
-    if (ImGui::Button("Reset view")) {
-        map.x = 0.5 + 10.0 / 360.0;
-        map.y = phreakshow::mercatorY(35.0);
-        map.zoom = 2;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Switzerland")) {
-        map.x = 0.5 + 8.13 / 360.0;
-        map.y = phreakshow::mercatorY(46.8);
-        map.zoom = 8;
-    }
-    ImGui::SameLine();
-    ImGui::Text("Zoom %d / %d", map.zoom, maxZoom);
-    ImGui::Checkbox("Sunrise", &showSunrise);
-    ImGui::SameLine();
-    ImGui::Checkbox("Swisscom", &showSwisscom);
-    ImGui::SameLine();
-    ImGui::Checkbox("Salt", &showSalt);
-    if (map.root.empty()) {
-        ImGui::TextWrapped("Local map tiles are missing. Place assets/map_tiles beside the executable.");
-        return;
-    }
-    // Reserve room for the coordinate label and attribution below the map.
-    ImVec2 size = ImGui::GetContentRegionAvail();
-    size.y -= 2 * ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
-    if (size.x < 1 || size.y < 1) return;
-    const ImVec2 origin = ImGui::GetCursorScreenPos();
-    ImGui::InvisibleButton("##offline_map", size, ImGuiButtonFlags_MouseButtonLeft);
-    const bool hovered = ImGui::IsItemHovered();
-    const auto& io = ImGui::GetIO();
-    const double offsetX = io.MousePos.x - origin.x - size.x * 0.5;
-    const double offsetY = io.MousePos.y - origin.y - size.y * 0.5;
-    if (hovered && io.MouseWheel != 0)
-        zoomAt(map.zoom + (io.MouseWheel > 0 ? 1 : -1), offsetX, offsetY);
-    const int count = 1 << map.zoom;
-    const double world = tileSize * count;
-    if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0)) {
-        map.x -= io.MouseDelta.x / world;
-        map.y -= io.MouseDelta.y / world;
-    }
-    map.x = phreakshow::wrapX(map.x);
-    const double halfHeight = std::min(0.5, size.y / (2.0 * world));
-    map.y = std::clamp(map.y, halfHeight, 1.0 - halfHeight);
-    const double left = map.x * world - size.x * 0.5;
-    const double top = map.y * world - size.y * 0.5;
-    auto* draw = ImGui::GetWindowDrawList();
-    const ImVec2 end(origin.x + size.x, origin.y + size.y);
-    draw->PushClipRect(origin, end, true);
-    draw->AddRectFilled(origin, end, IM_COL32(17, 27, 37, 255));
-    for (int ty = std::max(0, static_cast<int>(std::floor(top / tileSize))); ty < count && ty * tileSize < top + size.y; ++ty) {
-        for (int tx = static_cast<int>(std::floor(left / tileSize)); tx * tileSize < left + size.x; ++tx) {
-            const int wrappedX = (tx % count + count) % count;
-            const TileImage tile = map.image(map.zoom, wrappedX, ty);
-            const ImVec2 a(origin.x + static_cast<float>(tx * tileSize - left), origin.y + static_cast<float>(ty * tileSize - top));
-            const ImVec2 b(a.x + tileSize, a.y + tileSize);
-            if (tile.texture) draw->AddImage(static_cast<ImTextureID>(tile.texture), a, b, tile.uv0, tile.uv1);
-            else {
-                draw->AddRect(a, b, IM_COL32(90, 105, 120, 255));
-                draw->AddText(ImVec2(a.x + 10, a.y + 10), IM_COL32(220, 220, 220, 255), "Tile unavailable");
-            }
-        }
-    }
-    for (const auto& point : phreakshow::mapPoints)
-        drawMapPoint(draw, point, origin, size, left, top, world);
-    const double pointerY = (top + io.MousePos.y - origin.y) / world;
-    const bool onMap = hovered && pointerY >= 0.0 && pointerY <= 1.0;
-    if (onMap) {
-        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
-        draw->AddLine(ImVec2(io.MousePos.x - 8, io.MousePos.y), ImVec2(io.MousePos.x + 8, io.MousePos.y), IM_COL32(255, 210, 90, 255));
-        draw->AddLine(ImVec2(io.MousePos.x, io.MousePos.y - 8), ImVec2(io.MousePos.x, io.MousePos.y + 8), IM_COL32(255, 210, 90, 255));
-    }
-    draw->PopClipRect();
-    draw->AddRect(origin, end, IM_COL32(80, 100, 120, 255));
-    if (onMap) {
-        const double pointerX = (left + io.MousePos.x - origin.x) / world;
-        ImGui::Text("Latitude: %.5f deg   Longitude: %.5f deg", phreakshow::latitude(pointerY), phreakshow::longitude(pointerX));
-    } else ImGui::TextUnformatted("Latitude: --   Longitude: --  (point at the map)");
-    ImGui::TextDisabled("Swiss map: \xC2\xA9 swisstopo, SMR200 2025 | World: Natural Earth | Offline | Swiss detail to zoom 12");
+    phreakshow::detail::state().tiles.shutdown();
+    phreakshow::detail::state().database.close();
 }
