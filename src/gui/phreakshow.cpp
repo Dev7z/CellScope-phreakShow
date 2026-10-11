@@ -22,121 +22,178 @@
 #define GL_CLAMP_TO_EDGE 0x812F
 #endif
 
-namespace {
-constexpr int tileSize = 256;
-constexpr int maxZoom = 16;
-constexpr int swissTileZoom = 12;
-struct CachedTile {
-    GLuint texture = 0;
-    int lastFrame = 0;
-};
-struct TileImage {
-    GLuint texture = 0;
-    ImVec2 uv0{0, 0};
-    ImVec2 uv1{1, 1};
-    int sourceZoom = 0;
-};
-struct MapState {
-    double x = 0.5 + 8.13 / 360.0;
-    double y = phreakshow::mercatorY(46.8);
-    int zoom = 8;
-    std::map<std::string, CachedTile> textures;
-    std::filesystem::path root;
-    bool located = false;
+namespace phreakshow {
+    std::vector<MapPoint> mapPoints;
 
-    void locate() {
-        if (located) return;
-        located = true;
-        // Executable-relative resources allow launching from an arbitrary cwd.
-        std::error_code ec;
-        const auto exe = std::filesystem::read_symlink("/proc/self/exe", ec);
-#if defined(_WIN32)
-        wchar_t path[32768]{};
-        const DWORD length = GetModuleFileNameW(nullptr, path, 32768);
-        const auto exeDir = length && length < 32768
-            ? std::filesystem::path(path).parent_path() : std::filesystem::path{};
-#else
-        const auto exeDir = ec ? std::filesystem::path{} : exe.parent_path();
-#endif
-        for (const auto& candidate : {exeDir / "assets/map_tiles",
-                                     std::filesystem::path("assets/map_tiles"),
-                                     std::filesystem::path(PHREAKSHOW_TILE_DIR)}) {
-            if (std::filesystem::exists(candidate / "0/0/0.rgb.z")) {
-                root = candidate;
-                return;
-            }
+    namespace {
+        bool validCoordinates(double longitude, double latitude) {
+            return std::isfinite(longitude) && std::isfinite(latitude) &&
+                   longitude >= -180.0 && longitude <= 180.0 &&
+                   latitude >= -90.0 && latitude <= 90.0;
         }
     }
 
-    GLuint tile(int z, int tx, int ty) {
-        const std::string key = std::to_string(z) + "/" + std::to_string(tx) + "/" + std::to_string(ty) + ".rgb.z";
-        const auto found = textures.find(key);
-        if (found != textures.end()) {
-            found->second.lastFrame = ImGui::GetFrameCount();
-            return found->second.texture;
-        }
+    bool addMapPoint(double longitude, double latitude, MapProvider provider) {
+        if (!validCoordinates(longitude, latitude)) return false;
+        mapPoints.push_back({longitude, latitude, provider});
+        return true;
+    }
+} // namespace phreakshow
+
+namespace {
+    constexpr int tileSize = 256;
+    constexpr int maxZoom = 16;
+    constexpr int swissTileZoom = 12;
+    struct CachedTile {
         GLuint texture = 0;
-        std::ifstream file(root / key, std::ios::binary | std::ios::ate);
-        if (file) {
-            const auto size = file.tellg();
-            // Bound reads and decoded size even if a local tile is corrupted.
-            if (size > 0 && size <= 1024 * 1024) {
-                std::vector<unsigned char> compressed(static_cast<size_t>(size));
-                std::vector<unsigned char> pixels(tileSize * tileSize * 3);
-                file.seekg(0);
-                file.read(reinterpret_cast<char*>(compressed.data()), compressed.size());
-                uLongf decoded = pixels.size();
-                if (file && uncompress(pixels.data(), &decoded, compressed.data(), compressed.size()) == Z_OK && decoded == pixels.size()) {
-                    GLint previousTexture = 0, alignment = 4;
-                    glGetIntegerv(GL_TEXTURE_BINDING_2D, &previousTexture);
-                    glGetIntegerv(GL_UNPACK_ALIGNMENT, &alignment);
-                    glGenTextures(1, &texture);
-                    glBindTexture(GL_TEXTURE_2D, texture);
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-                    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-                    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, tileSize, tileSize, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
-                    glPixelStorei(GL_UNPACK_ALIGNMENT, alignment);
-                    glBindTexture(GL_TEXTURE_2D, previousTexture);
+        int lastFrame = 0;
+    };
+    struct TileImage {
+        GLuint texture = 0;
+        ImVec2 uv0{0, 0};
+        ImVec2 uv1{1, 1};
+        int sourceZoom = 0;
+    };
+    struct MapState {
+        double x = 0.5 + 8.13 / 360.0;
+        double y = phreakshow::mercatorY(46.8);
+        int zoom = 8;
+        std::map<std::string, CachedTile> textures;
+        std::filesystem::path root;
+        bool located = false;
+
+        void locate() {
+            if (located) return;
+            located = true;
+            // Executable-relative resources allow launching from an arbitrary cwd.
+            std::error_code ec;
+            const auto exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+    #if defined(_WIN32)
+            wchar_t path[32768]{};
+            const DWORD length = GetModuleFileNameW(nullptr, path, 32768);
+            const auto exeDir = length && length < 32768
+                ? std::filesystem::path(path).parent_path() : std::filesystem::path{};
+    #else
+            const auto exeDir = ec ? std::filesystem::path{} : exe.parent_path();
+    #endif
+            for (const auto& candidate : {exeDir / "assets/map_tiles",
+                                         std::filesystem::path("assets/map_tiles"),
+                                         std::filesystem::path(PHREAKSHOW_TILE_DIR)}) {
+                if (std::filesystem::exists(candidate / "0/0/0.rgb.z")) {
+                    root = candidate;
+                    return;
                 }
             }
         }
-        textures.emplace(key, CachedTile{texture, ImGui::GetFrameCount()});
-        return texture;
-    }
 
-    TileImage image(int z, int tx, int ty) {
-        // Missing regional tiles reuse the appropriate portion of their parent.
-        // This also allows zooming beyond the native Swiss raster resolution.
-        for (int sourceZoom = std::min(z, swissTileZoom); sourceZoom >= 0; --sourceZoom) {
-            const int factor = 1 << (z - sourceZoom);
-            const GLuint texture = tile(sourceZoom, tx / factor, ty / factor);
-            if (texture) {
-                const float u = static_cast<float>(tx % factor) / factor;
-                const float v = static_cast<float>(ty % factor) / factor;
-                const float span = 1.0f / factor;
-                return {texture, ImVec2(u, v), ImVec2(u + span, v + span), sourceZoom};
+        GLuint tile(int z, int tx, int ty) {
+            const std::string key = std::to_string(z) + "/" + std::to_string(tx) + "/" + std::to_string(ty) + ".rgb.z";
+            const auto found = textures.find(key);
+            if (found != textures.end()) {
+                found->second.lastFrame = ImGui::GetFrameCount();
+                return found->second.texture;
+            }
+            GLuint texture = 0;
+            std::ifstream file(root / key, std::ios::binary | std::ios::ate);
+            if (file) {
+                const auto size = file.tellg();
+                // Bound reads and decoded size even if a local tile is corrupted.
+                if (size > 0 && size <= 1024 * 1024) {
+                    std::vector<unsigned char> compressed(static_cast<size_t>(size));
+                    std::vector<unsigned char> pixels(tileSize * tileSize * 3);
+                    file.seekg(0);
+                    file.read(reinterpret_cast<char*>(compressed.data()), compressed.size());
+                    uLongf decoded = pixels.size();
+                    if (file && uncompress(pixels.data(), &decoded, compressed.data(), compressed.size()) == Z_OK && decoded == pixels.size()) {
+                        GLint previousTexture = 0, alignment = 4;
+                        glGetIntegerv(GL_TEXTURE_BINDING_2D, &previousTexture);
+                        glGetIntegerv(GL_UNPACK_ALIGNMENT, &alignment);
+                        glGenTextures(1, &texture);
+                        glBindTexture(GL_TEXTURE_2D, texture);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+                        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, tileSize, tileSize, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+                        glPixelStorei(GL_UNPACK_ALIGNMENT, alignment);
+                        glBindTexture(GL_TEXTURE_2D, previousTexture);
+                    }
+                }
+            }
+            textures.emplace(key, CachedTile{texture, ImGui::GetFrameCount()});
+            return texture;
+        }
+
+        TileImage image(int z, int tx, int ty) {
+            // Missing regional tiles reuse the appropriate portion of their parent.
+            // This also allows zooming beyond the native Swiss raster resolution.
+            for (int sourceZoom = std::min(z, swissTileZoom); sourceZoom >= 0; --sourceZoom) {
+                const int factor = 1 << (z - sourceZoom);
+                const GLuint texture = tile(sourceZoom, tx / factor, ty / factor);
+                if (texture) {
+                    const float u = static_cast<float>(tx % factor) / factor;
+                    const float v = static_cast<float>(ty % factor) / factor;
+                    const float span = 1.0f / factor;
+                    return {texture, ImVec2(u, v), ImVec2(u + span, v + span), sourceZoom};
+                }
+            }
+            return {};
+        }
+
+        void trimCache() {
+            // Never delete a texture referenced by the previous frame's draw data.
+            // Keep GPU memory bounded as the user pans across the regional tiles.
+            if (textures.size() <= 512) return;
+            const int cutoff = ImGui::GetFrameCount() - 1;
+            for (auto it = textures.begin(); it != textures.end() && textures.size() > 256;) {
+                if (it->second.lastFrame < cutoff) {
+                    if (it->second.texture) glDeleteTextures(1, &it->second.texture);
+                    it = textures.erase(it);
+                } else ++it;
             }
         }
-        return {};
-    }
+    };
+    MapState map;
+    bool showSunrise = true;
+    bool showSwisscom = true;
+    bool showSalt = true;
 
-    void trimCache() {
-        // Never delete a texture referenced by the previous frame's draw data.
-        // Keep GPU memory bounded as the user pans across the regional tiles.
-        if (textures.size() <= 512) return;
-        const int cutoff = ImGui::GetFrameCount() - 1;
-        for (auto it = textures.begin(); it != textures.end() && textures.size() > 256;) {
-            if (it->second.lastFrame < cutoff) {
-                if (it->second.texture) glDeleteTextures(1, &it->second.texture);
-                it = textures.erase(it);
-            } else ++it;
+    void drawMapPoint(ImDrawList* draw, const phreakshow::MapPoint& point, const ImVec2& origin, const ImVec2& size, double left, double top, double world) {
+        // Direct edits of the public list must not feed invalid values to ImGui.
+        if (!phreakshow::validCoordinates(point.longitude, point.latitude)) return;
+        ImU32 color = IM_COL32(255, 210, 90, 255);
+        switch (point.provider) {
+        case phreakshow::MapProvider::Sunrise:
+            if (!showSunrise) return;
+            color = IM_COL32(235, 75, 90, 255);
+            break;
+        case phreakshow::MapProvider::Swisscom:
+            if (!showSwisscom) return;
+            color = IM_COL32(65, 145, 255, 255);
+            break;
+        case phreakshow::MapProvider::Salt:
+            if (!showSalt) return;
+            color = IM_COL32(100, 215, 125, 255);
+            break;
+        case phreakshow::MapProvider::Unspecified:
+            break;
+        }
+        constexpr float radius = 5.0f;
+        const double y = phreakshow::mercatorY(point.latitude) * world - top;
+        if (y < -radius || y > size.y + radius) return;
+        const double x = phreakshow::wrapX(0.5 + point.longitude / 360.0) * world;
+        // Repeat markers with the tiles when the viewport crosses the date line
+        // or is wider than the world at low zoom levels.
+        const double first = std::ceil((left - radius - x) / world);
+        const double last = std::floor((left + size.x + radius - x) / world);
+        for (double copy = first; copy <= last; copy += 1.0) {
+            const ImVec2 position(origin.x + static_cast<float>(x + copy * world - left),
+                                  origin.y + static_cast<float>(y));
+            draw->AddCircleFilled(position, radius, color);
+            draw->AddCircle(position, radius, IM_COL32(20, 25, 30, 255), 0, 1.5f);
         }
     }
-};
-MapState map;
 }
 
 void shutdownPhreakShow() {
@@ -174,6 +231,11 @@ void drawPhreakShow() {
     }
     ImGui::SameLine();
     ImGui::Text("Zoom %d / %d", map.zoom, maxZoom);
+    ImGui::Checkbox("Sunrise", &showSunrise);
+    ImGui::SameLine();
+    ImGui::Checkbox("Swisscom", &showSwisscom);
+    ImGui::SameLine();
+    ImGui::Checkbox("Salt", &showSalt);
     if (map.root.empty()) {
         ImGui::TextWrapped("Local map tiles are missing. Place assets/map_tiles beside the executable.");
         return;
@@ -218,6 +280,8 @@ void drawPhreakShow() {
             }
         }
     }
+    for (const auto& point : phreakshow::mapPoints)
+        drawMapPoint(draw, point, origin, size, left, top, world);
     const double pointerY = (top + io.MousePos.y - origin.y) / world;
     const bool onMap = hovered && pointerY >= 0.0 && pointerY <= 1.0;
     if (onMap) {
