@@ -12,6 +12,7 @@
 #include <jpeglib.h>
 #include <setjmp.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -139,7 +140,7 @@ struct MapTiles::Impl {
         Bytes pixels;
         std::string error;
     };
-    std::filesystem::path offlineRoot, satelliteRoot;
+    std::filesystem::path offlineRoot, satelliteRoot, mapRoot;
     std::map<std::string, Texture> textures;
     std::mutex mutex;
     std::condition_variable wake;
@@ -148,7 +149,7 @@ struct MapTiles::Impl {
     std::deque<Download> completed;
     std::thread worker;
     std::atomic<bool> stopping{false};
-    std::string lastError;
+    std::array<std::string, 2> lastError;
 
     Impl() {
         const auto exeDir = executableDirectory();
@@ -160,6 +161,7 @@ struct MapTiles::Impl {
             }
         }
         satelliteRoot = exeDir / "assets/satellite_cache";
+        mapRoot = exeDir / "assets/map_cache";
     }
 
     void run() {
@@ -175,13 +177,15 @@ struct MapTiles::Impl {
                 requests.pop_back();
             }
             Download result{key, {}, {}};
-            const auto path = satelliteRoot / (key + ".jpeg");
+            const bool aerial = key.rfind("sat/", 0) == 0;
+            const auto path = (aerial ? satelliteRoot : mapRoot) / (key.substr(4) + ".jpeg");
             Bytes encoded = readFile(path);
             result.pixels = decodeJpeg(encoded);
             if (result.pixels.empty() && curl) {
                 encoded.clear();
                 // Official XYZ endpoint: https://docs.geo.admin.ch/visualize-data/xyz.html
-                const std::string url = "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.swissimage/default/current/3857/" + key + ".jpeg";
+                const std::string layer = aerial ? "ch.swisstopo.swissimage" : "ch.swisstopo.pixelkarte-farbe";
+                const std::string url = "https://wmts.geo.admin.ch/1.0.0/" + layer + "/default/current/3857/" + key.substr(4) + ".jpeg";
                 curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
                 curl_easy_setopt(curl, CURLOPT_USERAGENT, "CellScope-phreakShow/1.0");
                 curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, receiveBytes);
@@ -195,7 +199,7 @@ struct MapTiles::Impl {
                 curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &stopping);
                 const CURLcode status = curl_easy_perform(curl);
                 if (status == CURLE_OK) result.pixels = decodeJpeg(encoded);
-                if (result.pixels.empty()) result.error = status == CURLE_OK ? "Invalid aerial tile" : curl_easy_strerror(status);
+                if (result.pixels.empty()) result.error = status == CURLE_OK ? "Invalid map tile" : curl_easy_strerror(status);
                 else {
                     std::error_code ec;
                     std::filesystem::create_directories(path.parent_path(), ec);
@@ -208,7 +212,7 @@ struct MapTiles::Impl {
                         if (wrote) std::filesystem::rename(temporary, path, ec);
                     }
                 }
-            } else if (result.pixels.empty()) result.error = "Could not initialize satellite download";
+            } else if (result.pixels.empty()) result.error = "Could not initialize map download";
             {
                 std::lock_guard<std::mutex> lock(mutex);
                 // UI drains results each frame. Bound memory if it stops drawing.
@@ -241,9 +245,9 @@ struct MapTiles::Impl {
         return id;
     }
 
-    GLuint satellite(int z, int x, int y) {
-        const std::string key = std::to_string(z) + "/" + std::to_string(x) + "/" + std::to_string(y);
-        const auto found = textures.find("sat/" + key);
+    GLuint online(int z, int x, int y, bool aerial) {
+        const std::string key = std::string(aerial ? "sat/" : "map/") + std::to_string(z) + "/" + std::to_string(x) + "/" + std::to_string(y);
+        const auto found = textures.find(key);
         if (found != textures.end()) {
             found->second.lastFrame = ImGui::GetFrameCount();
             if (found->second.id) return found->second.id;
@@ -272,11 +276,10 @@ void MapTiles::beginFrame() {
         for (const auto& result : results) impl_->pending.erase(result.key);
     }
     for (const auto& result : results) {
-        const auto key = "sat/" + result.key;
-        auto& texture = impl_->textures[key];
+        auto& texture = impl_->textures[result.key];
         if (texture.id) glDeleteTextures(1, &texture.id);
         texture = {result.pixels.empty() ? 0 : upload(result.pixels), ImGui::GetFrameCount(), Clock::now()};
-        if (!result.error.empty()) impl_->lastError = result.error;
+        impl_->lastError[result.key.rfind("sat/", 0) == 0 ? 1 : 0] = result.error;
     }
     // Retain textures referenced by the previous frame (including viewports).
     if (impl_->textures.size() <= 512) return;
@@ -291,9 +294,21 @@ void MapTiles::beginFrame() {
 
 MapTile MapTiles::image(int zoom, int x, int y, bool satellite) {
     if (!impl_ || zoom < 0 || zoom > 20 || x < 0 || y < 0 || x >= (1 << zoom) || y >= (1 << zoom)) return {};
-    if (satellite && zoom >= 13) {
-        const GLuint id = impl_->satellite(zoom, x, y);
-        if (id) return {id, {0, 0}, {1, 1}, true};
+    if (zoom >= 13) {
+        const GLuint id = impl_->online(zoom, x, y, satellite);
+        if (id) return {id, {0, 0}, {1, 1}, satellite, true};
+        // A cached parent can bridge the gap while exact-resolution tiles load.
+        for (int sourceZoom = zoom - 1; sourceZoom >= 13; --sourceZoom) {
+            const int factor = 1 << (zoom - sourceZoom);
+            const std::string key = std::string(satellite ? "sat/" : "map/") +
+                std::to_string(sourceZoom) + "/" + std::to_string(x / factor) + "/" + std::to_string(y / factor);
+            const auto found = impl_->textures.find(key);
+            if (found != impl_->textures.end() && found->second.id) {
+                found->second.lastFrame = ImGui::GetFrameCount();
+                const float u = static_cast<float>(x % factor) / factor, v = static_cast<float>(y % factor) / factor;
+                return {found->second.id, {u, v}, {u + 1.0f / factor, v + 1.0f / factor}, satellite, false};
+            }
+        }
     }
     for (int sourceZoom = std::min(zoom, 12); sourceZoom >= 0; --sourceZoom) {
         const int factor = 1 << (zoom - sourceZoom);
@@ -308,21 +323,24 @@ MapTile MapTiles::image(int zoom, int x, int y, bool satellite) {
     return {};
 }
 bool MapTiles::hasOfflineMap() const { return impl_ && !impl_->offlineRoot.empty(); }
-std::string MapTiles::satelliteStatus() const {
+std::string MapTiles::onlineStatus(bool satellite) const {
     if (!impl_) return {};
     std::lock_guard<std::mutex> lock(impl_->mutex);
     std::string status;
-    if (!impl_->pending.empty()) status = "Loading " + std::to_string(impl_->pending.size()) + " aerial tiles. ";
-    if (!impl_->lastError.empty()) status += "Aerial tile unavailable: " + impl_->lastError + ". ";
+    const std::string prefix = satellite ? "sat/" : "map/";
+    const auto count = std::count_if(impl_->pending.begin(), impl_->pending.end(), [&](const auto& key) { return key.rfind(prefix, 0) == 0; });
+    if (count) status = "Loading " + std::to_string(count) + (satellite ? " aerial tiles. " : " detailed map tiles. ");
+    const auto& error = impl_->lastError[satellite ? 1 : 0];
+    if (!error.empty()) status += "Tile unavailable: " + error + ". ";
     return status;
 }
-void MapTiles::retrySatellite() {
+void MapTiles::retryOnline() {
     if (!impl_) return;
     for (auto it = impl_->textures.begin(); it != impl_->textures.end();) {
-        if (it->first.rfind("sat/", 0) == 0 && !it->second.id) it = impl_->textures.erase(it);
+        if ((it->first.rfind("sat/", 0) == 0 || it->first.rfind("map/", 0) == 0) && !it->second.id) it = impl_->textures.erase(it);
         else ++it;
     }
-    impl_->lastError.clear();
+    impl_->lastError = {};
 }
 void MapTiles::shutdown() {
     if (!impl_) return;

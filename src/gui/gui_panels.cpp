@@ -1384,25 +1384,45 @@ void drawAbout(App& app)
     if (!app.showAbout)
         return;
 
-    ImGui::SetNextWindowSize(ImVec2(420, 340), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(780, 400), ImGuiCond_Appearing);
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::Begin((std::string(_L("About CellScope")) + "###About CellScope").c_str(), &app.showAbout,
-                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoDocking |
+    if (ImGui::Begin("About CellScope / phreakShow###About CellScope", &app.showAbout,
+                     ImGuiWindowFlags_NoDocking |
                      ImGuiWindowFlags_NoCollapse))
     {
-        ImGui::TextWrapped("CellScope v" CELLSCOPE_VERSION);
-        ImGui::Separator();
-        ImGui::TextWrapped("CellScope was created by Sarah Rose.");
-        ImGui::Spacing();
-        ImGui::TextWrapped("Built with components from:");
-        ImGui::TextDisabled("  JAERO (Jontio)");
-        ImGui::TextDisabled("  inmarsat-sniffer");
-        ImGui::TextDisabled("  scytaleC (Thierry Leconte)");
-        ImGui::TextDisabled("  DeDECTive (Sarah Rose)");
-        ImGui::Spacing();
-        ImGui::TextWrapped("Thanks to Arclamp VK4SUS for providing a server for accessing the satellite during development.");
-        ImGui::Spacing();
-        ImGui::TextWrapped("Thanks to Mike AA8IA for donating an Airspy R2 and Airspy Mini for development.");
+        if (ImGui::BeginTable("about_sections", 2, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchSame))
+        {
+            ImGui::TableNextColumn();
+            ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.3f);
+            ImGui::TextWrapped("CellScope v" CELLSCOPE_VERSION);
+            ImGui::PopFont();
+            ImGui::Separator();
+            ImGui::TextWrapped("CellScope was created by Sarah Rose.");
+            ImGui::Spacing();
+            ImGui::TextWrapped("Built with components from:");
+            ImGui::TextDisabled("  JAERO (Jontio)");
+            ImGui::TextDisabled("  inmarsat-sniffer");
+            ImGui::TextDisabled("  scytaleC (Thierry Leconte)");
+            ImGui::TextDisabled("  DeDECTive (Sarah Rose)");
+            ImGui::Spacing();
+            ImGui::TextWrapped("Thanks to Arclamp VK4SUS for providing a server for accessing the satellite during development.");
+            ImGui::Spacing();
+            ImGui::TextWrapped("Thanks to Mike AA8IA for donating an Airspy R2 and Airspy Mini for development.");
+            ImGui::TableNextColumn();
+            ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.3f);
+            ImGui::TextUnformatted("phreakShow");
+            ImGui::PopFont();
+            ImGui::Separator();
+            ImGui::TextWrapped("Antenna database explorer, map and tuning companion for CellScope.");
+            ImGui::Spacing();
+            ImGui::TextWrapped("Browse antennas by location, company or frequency. Inspect station details and tune CellScope to a selected antenna.");
+            ImGui::Spacing();
+            ImGui::TextWrapped("Swiss maps and aerial imagery: swisstopo. World overview: Natural Earth.");
+            ImGui::Spacing();
+            ImGui::TextWrapped("Enable Map navigation with hotkeys in the map controls:");
+            ImGui::TextWrapped("WASD: pan\n1 / 2 / 3: Swisscom / Sunrise / Salt\nQ / E: shorten / lengthen azimuth lines\n+ / -: zoom\nC: user point at center\nV: user point at cursor");
+            ImGui::EndTable();
+        }
     }
     ImGui::End();
 }
@@ -1876,7 +1896,11 @@ bool drawDockHost(App& app)
         ImGui::DockBuilderDockWindow("phreakShow###PhreakShowWorkspace", workspaceDock);
         ImGui::DockBuilderFinish(workspaceDock);
     }
-    ImGui::DockSpace(workspaceDock, ImVec2(0, 0));
+    // Nested workspace dockspaces are unreliable as detached OS windows on
+    // some backends. Keep the two workspace tabs in the main host; their
+    // individual tool panels can still be moved and docked normally.
+    ImGui::DockSpace(workspaceDock, ImVec2(0, 0),
+        ImGuiDockNodeFlags_NoUndocking | ImGuiDockNodeFlags_NoDockingSplit);
 
     if (ImGui::BeginMenuBar())
     {
@@ -1884,6 +1908,10 @@ bool drawDockHost(App& app)
         {
             if (ImGui::MenuItem(_L("Reset Layout")))
                 app.forceDefaultLayout = true;
+            if (ImGui::MenuItem("Delete saved settings (cellscope.ini)", nullptr, false, ImGui::GetIO().IniFilename != nullptr))
+            {
+                cfgDeleteIni(app.settingsResetStatus);
+            }
 #ifdef HAS_LTE
             ImGui::MenuItem(_L("LTE"), nullptr, &app.showLte);
 #endif
@@ -1897,14 +1925,27 @@ bool drawDockHost(App& app)
         }
         ImGui::EndMenuBar();
     }
+    // Open outside the menu ID stack so the result survives menu dismissal.
+    if (!app.settingsResetStatus.empty()) ImGui::OpenPopup("Saved settings");
+    if (ImGui::BeginPopupModal("Saved settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35);
+        ImGui::TextUnformatted(app.settingsResetStatus.c_str());
+        ImGui::PopTextWrapPos();
+        if (ImGui::Button("OK")) { app.settingsResetStatus.clear(); ImGui::CloseCurrentPopup(); }
+        ImGui::EndPopup();
+    }
 
     ImGui::End();
+    // Also recover workspaces that were detached in an older saved layout.
+    ImGui::SetNextWindowDockID(workspaceDock, ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     const bool showCellScope = ImGui::Begin("CellScope###CellScopeWorkspace", nullptr,
         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar();
     ImGui::DockSpace(dockId, ImVec2(0, 0), showCellScope ? 0 : ImGuiDockNodeFlags_KeepAliveOnly);
     ImGui::End();
+    ImGui::SetNextWindowDockID(workspaceDock, ImGuiCond_Always);
     drawPhreakShow(app);
     return showCellScope;
 }

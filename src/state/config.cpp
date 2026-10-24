@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <thread>
 #include <utility>
@@ -164,6 +165,25 @@ void cfgRegisterHandler(App& app)
         cfgWriteAll(*static_cast<App*>(handler->UserData), buf);
     };
     ImGui::AddSettingsHandler(&h);
+}
+
+bool cfgDeleteIni(std::string& status)
+{
+    auto& io = ImGui::GetIO();
+    if (!io.IniFilename) { status = "Settings saving is already disabled for this session."; return true; }
+    const auto path = std::filesystem::u8path(io.IniFilename);
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    if (error) {
+        status = "Could not delete " + path.u8string() + ": " + error.message();
+        return false;
+    }
+    // ImGui autosaves and main() saves at exit. Disable both so the file stays
+    // deleted; a fresh launch will start with the normal built-in defaults.
+    io.IniFilename = nullptr;
+    io.WantSaveIniSettings = false;
+    status = "Deleted " + path.u8string() + ". Restart to use default settings and layout. Settings saving is disabled until then.";
+    return true;
 }
 
 // Bump this whenever the built-in default dock layout changes so saved older

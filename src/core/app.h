@@ -138,6 +138,7 @@ struct App
     float iqBufferSec = 10.0f;  // IQ pre-buffer seconds (0 = disabled)
 
     bool showAbout = false;
+    std::string settingsResetStatus;
     bool autoAddLes = true;       // auto-create decoders for discovered LES frequencies
     int  maxLesAutoDecoders = 4;  // cap on auto-created LES decoders
 

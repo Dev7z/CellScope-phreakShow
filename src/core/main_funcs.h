@@ -42,6 +42,7 @@ void drawLteCalls(App&);
 void cfgWriteAll(App&, struct ImGuiTextBuffer*);
 void cfgReadLine(App&, const char*);
 void cfgRegisterHandler(App&);
+bool cfgDeleteIni(std::string& status);
 
 // main.cpp
 bool openWavDialog(char* out, int outLen);

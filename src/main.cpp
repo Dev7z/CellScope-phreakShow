@@ -275,7 +275,7 @@ int main(int, char**)
     }
 
     // Persist settings + dock layout to cellscope.ini before shutting down.
-    ImGui::SaveIniSettingsToDisk(io.IniFilename);
+    if (io.IniFilename) ImGui::SaveIniSettingsToDisk(io.IniFilename);
 
     if (app.startThread.joinable())
         app.startThread.join();

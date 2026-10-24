@@ -6,7 +6,8 @@ namespace phreakshow::detail {
 namespace {
 constexpr int tileSize = 256;
 constexpr int maxZoom = 18;
-constexpr float sectorLength = 52;
+constexpr ImU32 selectedColor = IM_COL32(255, 225, 70, 255);
+constexpr ImU32 hoverColor = IM_COL32(210, 130, 20, 255);
 
 ImU32 providerColor(MapProvider provider) {
     switch (provider) {
@@ -41,97 +42,156 @@ struct Canvas {
     }
 };
 
-void drawSector(ImDrawList* draw, const Antenna& antenna, ImVec2 center, bool selected) {
-    const ImU32 color = selected ? IM_COL32(255, 225, 70, 255) : providerColor(antenna.provider);
+void drawSector(ImDrawList* draw, const Antenna& antenna, ImVec2 center, float length, ImU32 highlight = 0) {
+    const bool emphasized = highlight != 0;
+    const ImU32 color = emphasized ? highlight : providerColor(antenna.provider);
     if (!std::isfinite(antenna.azimuth)) {
         // Missing direction remains selectable at the mast's center.
-        draw->AddCircle(center, selected ? 9 : 6, color, 0, selected ? 3 : 1.5f);
+        draw->AddCircle(center, emphasized ? 9 : 6, color, 0, emphasized ? 3 : 1.5f);
         return;
     }
-    const auto direction = antennaDirection(antenna.azimuth, sectorLength);
+    const auto direction = antennaDirection(antenna.azimuth, length);
     const ImVec2 end(center.x + static_cast<float>(direction.first), center.y + static_cast<float>(direction.second));
-    draw->AddLine(center, end, IM_COL32(15, 20, 25, 255), selected ? 7 : 4);
-    draw->AddLine(center, end, color, selected ? 4 : 2);
-    draw->AddCircleFilled(end, selected ? 4 : 2.5f, color);
+    // A wider hover stroke remains visible beneath an identical selected ray.
+    const bool hovering = highlight == hoverColor;
+    draw->AddLine(center, end, IM_COL32(15, 20, 25, 255), hovering ? 11 : emphasized ? 7 : 4);
+    draw->AddLine(center, end, color, hovering ? 8 : emphasized ? 4 : 2);
+    draw->AddCircleFilled(end, hovering ? 7 : emphasized ? 4 : 2.5f, color);
 }
 
-void toolbar(ShowState& s) {
+// Keep each group compact without letting controls run into the next column.
+void nextToPrevious(float right, const char* label, bool checkbox = false) {
+    const auto& style = ImGui::GetStyle();
+    const float width = ImGui::CalcTextSize(label).x + (checkbox
+        ? ImGui::GetFrameHeight() + style.ItemInnerSpacing.x : 2 * style.FramePadding.x);
+    if (ImGui::GetItemRectMax().x + style.ItemSpacing.x + width <= right) ImGui::SameLine();
+}
+
+void navigationControls(ShowState& s) {
+    ImGui::SeparatorText("Map controls");
+    const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
     if (ImGui::Button("+")) s.zoom = std::min(maxZoom, s.zoom + 1);
-    ImGui::SameLine();
+    nextToPrevious(right, "-");
     if (ImGui::Button("-")) s.zoom = std::max(0, s.zoom - 1);
-    ImGui::SameLine();
+    nextToPrevious(right, "World");
     if (ImGui::Button("World")) s.center(10, 35, 2);
-    ImGui::SameLine();
+    nextToPrevious(right, "Switzerland");
     if (ImGui::Button("Switzerland")) s.center(8.13, 46.8, 8);
-    ImGui::SameLine();
-    // Basel SBB station (GeoNames 47.547480 N, 7.589772 E).
+    nextToPrevious(right, "Basel SBB");
     if (ImGui::Button("Basel SBB")) s.center(7.589772, 47.547480, 13);
-    ImGui::SameLine();
+    nextToPrevious(right, "Zoom 18");
     ImGui::Text("Zoom %d", s.zoom);
 
     for (auto p : {MapProvider::Sunrise, MapProvider::Swisscom, MapProvider::Salt}) {
-        if (p != MapProvider::Sunrise) ImGui::SameLine();
+        if (p != MapProvider::Sunrise) nextToPrevious(right, providerName(p), true);
         ImGui::PushStyleColor(ImGuiCol_Text, providerColor(p));
-        if (ImGui::Checkbox(providerName(p), &s.providers[static_cast<size_t>(p)])) s.nearestDirty = true;
+        ImGui::Checkbox(providerName(p), &s.providers[static_cast<size_t>(p)]);
         ImGui::PopStyleColor();
     }
-    ImGui::SameLine();
+    nextToPrevious(right, "Satellite / aerial", true);
     ImGui::BeginDisabled(s.zoom < 13);
     ImGui::Checkbox("Satellite / aerial", &s.satellite);
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("Available at zoom 13+. SWISSIMAGE aerial photography, cached locally.");
+    ImGui::SetNextItemWidth(std::max(ImGui::GetFontSize() * 5,
+        ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Azimuth line length").x - ImGui::GetStyle().ItemInnerSpacing.x));
+    ImGui::SliderFloat("Azimuth line length", &s.sectorLength, 8, 240, "%.0f px", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::Checkbox("Map navigation with hotkeys", &s.mapHotkeys);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip(
+        "Active while the map is focused or hovered, except while editing a field.\n"
+        "WASD: pan | 1: Swisscom | 2: Sunrise | 3: Salt\n"
+        "Q/E: shorten/lengthen azimuth lines | +/-: zoom\n"
+        "C: user point at map center | V: user point at mouse (over map)");
+}
 
-    if (ImGui::CollapsingHeader("Your coordinates / database")) {
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10);
-        ImGui::InputDouble("Longitude", &s.inputLongitude, 0, 0, "%.6f");
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10);
-        ImGui::InputDouble("Latitude", &s.inputLatitude, 0, 0, "%.6f");
-        if (ImGui::Button("Set user point")) {
-            s.invalidUserPosition = !validMapCoordinates(s.inputLongitude, s.inputLatitude);
-            if (!s.invalidUserPosition) {
-                s.userLongitude = s.inputLongitude;
-                s.userLatitude = s.inputLatitude;
-                s.userPositionSet = true;
-                s.nearestDirty = true;
-            }
-        }
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!s.userPositionSet);
-        if (ImGui::Button("Go to user (zoom 13)")) s.center(s.userLongitude, s.userLatitude, 13);
-        ImGui::EndDisabled();
-        if (s.invalidUserPosition) ImGui::TextColored(ImVec4(1, .4f, .3f, 1),
-            "Longitude must be -180..180, latitude -90..90.");
-        if (s.userPositionSet) ImGui::TextColored(ImVec4(.1f, 1, 1, 1), "User: %.6f, %.6f", s.userLongitude, s.userLatitude);
-        ImGui::SetNextItemWidth(-1);
-        ImGui::InputText("##database_path", s.databasePath, sizeof(s.databasePath));
-        if (ImGui::Button("Load / reload database")) {
-            s.selected = noAntenna;
-            s.selectedFields.clear();
-            s.pickCandidates.clear();
-            s.nearby.clear();
-            s.nearestDirty = true;
-            s.tuneStatus.clear();
-            s.database.open(std::filesystem::u8path(s.databasePath));
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Retry aerial tiles")) s.tiles.retrySatellite();
+void coordinateControls(ShowState& s) {
+    ImGui::SeparatorText("Your coordinates");
+    const float width = std::max(ImGui::GetFontSize() * 7,
+        ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Longitude").x - ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::SetNextItemWidth(width);
+    ImGui::InputDouble("Longitude", &s.inputLongitude, 0, 0, "%.6f");
+    ImGui::SetNextItemWidth(width);
+    ImGui::InputDouble("Latitude", &s.inputLatitude, 0, 0, "%.6f");
+    const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+    if (ImGui::Button("Set user point")) s.setUserPosition(s.inputLongitude, s.inputLatitude);
+    nextToPrevious(right, "Go to user");
+    ImGui::BeginDisabled(!s.userPositionSet);
+    if (ImGui::Button("Go to user")) s.center(s.userLongitude, s.userLatitude, 13);
+    ImGui::EndDisabled();
+    if (s.invalidUserPosition) ImGui::TextWrapped("Longitude must be -180..180, latitude -90..90.");
+    if (s.userPositionSet) ImGui::TextColored(ImVec4(.1f, 1, 1, 1), "User: %.6f, %.6f", s.userLongitude, s.userLatitude);
+}
+
+void databaseControls(ShowState& s) {
+    ImGui::SeparatorText("Database");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputText("##database_path", s.databasePath, sizeof(s.databasePath));
+    if (ImGui::Button("Load / reload database")) loadDatabase(s);
+    if (ImGui::Button("Retry map / aerial tiles")) s.tiles.retryOnline();
+}
+
+void toolbar(ShowState& s) {
+    const float width = ImGui::GetContentRegionAvail().x, font = ImGui::GetFontSize();
+    const int columns = width >= font * 60 ? 3 : width >= font * 42 ? 2 : 1;
+    if (ImGui::BeginTable("map_controls", columns, ImGuiTableFlags_SizingStretchProp |
+                          ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableSetupColumn("Navigation", ImGuiTableColumnFlags_WidthStretch, columns == 3 ? 46 : 55);
+        if (columns > 1) ImGui::TableSetupColumn("Coordinates", ImGuiTableColumnFlags_WidthStretch, columns == 3 ? 28 : 45);
+        if (columns == 3) ImGui::TableSetupColumn("Database", ImGuiTableColumnFlags_WidthStretch, 26);
+        ImGui::TableNextColumn();
+        navigationControls(s);
+        if (columns > 1) ImGui::TableNextColumn();
+        coordinateControls(s);
+        if (columns == 3) ImGui::TableNextColumn();
+        databaseControls(s);
+        ImGui::EndTable();
     }
     if (!s.database.error().empty()) ImGui::TextWrapped("Database: %s", s.database.error().c_str());
     if (!s.tiles.hasOfflineMap()) ImGui::TextWrapped("Offline tiles missing: place assets/map_tiles beside the executable.");
-    ImGui::TextDisabled("Drag to pan, scroll to zoom, click to select. Zoom 14+: fixed-length directions.");
+}
+
+bool keyboardNavigation(ShowState& s, bool canvasHovered) {
+    const auto& io = ImGui::GetIO();
+    if (!s.mapHotkeys || io.WantTextInput || ImGui::IsAnyItemActive() || io.KeyCtrl || io.KeyAlt || io.KeySuper ||
+        (!canvasHovered && !ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) ||
+        ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) return false;
+    if (ImGui::IsKeyPressed(ImGuiKey_Equal) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) s.zoom = std::min(maxZoom, s.zoom + 1);
+    if (ImGui::IsKeyPressed(ImGuiKey_Minus) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) s.zoom = std::max(0, s.zoom - 1);
+    const float seconds = std::clamp(io.DeltaTime, 0.0f, 0.1f);
+    const float lineDelta = (ImGui::IsKeyDown(ImGuiKey_E) ? 1.0f : 0.0f) - (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.0f : 0.0f);
+    s.sectorLength = std::clamp(s.sectorLength + lineDelta * 100 * seconds, 8.0f, 240.0f);
+    double dx = (ImGui::IsKeyDown(ImGuiKey_D) ? 1 : 0) - (ImGui::IsKeyDown(ImGuiKey_A) ? 1 : 0);
+    double dy = (ImGui::IsKeyDown(ImGuiKey_S) ? 1 : 0) - (ImGui::IsKeyDown(ImGuiKey_W) ? 1 : 0);
+    const double length = std::hypot(dx, dy);
+    if (length > 0) {
+        const double step = 400 * seconds / (tileSize * (1 << s.zoom)) / length;
+        s.mapX += dx * step;
+        s.mapY += dy * step;
+    }
+    for (const auto& toggle : {std::pair{ImGuiKey_1, MapProvider::Swisscom},
+                              std::pair{ImGuiKey_2, MapProvider::Sunrise},
+                              std::pair{ImGuiKey_3, MapProvider::Salt}}) {
+        if (ImGui::IsKeyPressed(toggle.first, false)) {
+            auto& enabled = s.providers[static_cast<size_t>(toggle.second)];
+            enabled = !enabled;
+        }
+    }
+    return true;
 }
 } // namespace
 
 void drawMapCanvas(ShowState& s) {
     toolbar(s);
     ImVec2 size = ImGui::GetContentRegionAvail();
-    size.y -= 3 * ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
+    const int footerLines = 5 + (s.onlyNearbyOnMap ? 1 : 0) + (size.x < ImGui::GetFontSize() * 45 ? 2 : 0);
+    size.y -= footerLines * ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
     if (size.x < 1 || size.y < 40) return;
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton("##map_canvas", size, ImGuiButtonFlags_MouseButtonLeft);
     const bool hovered = ImGui::IsItemHovered();
     const auto& io = ImGui::GetIO();
+    const bool keys = keyboardNavigation(s, hovered);
     const double offsetX = io.MousePos.x - origin.x - size.x / 2;
     const double offsetY = io.MousePos.y - origin.y - size.y / 2;
     if (hovered && io.MouseWheel != 0) {
@@ -154,11 +214,16 @@ void drawMapCanvas(ShowState& s) {
     const double halfHeight = std::min(0.5, size.y / (2 * world));
     s.mapY = std::clamp(s.mapY, halfHeight, 1 - halfHeight);
     const Canvas canvas{origin, size, s.mapX * world - size.x / 2, s.mapY * world - size.y / 2, world};
+    if (keys && ImGui::IsKeyPressed(ImGuiKey_C, false)) s.setUserPosition(longitude(s.mapX), latitude(s.mapY));
+    if (keys && hovered && ImGui::IsKeyPressed(ImGuiKey_V, false))
+        s.setUserPosition(longitude((canvas.left + io.MousePos.x - origin.x) / world),
+                          latitude((canvas.top + io.MousePos.y - origin.y) / world));
+    s.refreshNearby();
     auto* draw = ImGui::GetWindowDrawList();
     const ImVec2 end(origin.x + size.x, origin.y + size.y);
     draw->PushClipRect(origin, end, true);
     draw->AddRectFilled(origin, end, IM_COL32(17, 27, 37, 255));
-    bool aerialFallback = false;
+    bool tileFallback = false;
     for (int ty = std::max(0, static_cast<int>(std::floor(canvas.top / tileSize)));
          ty < count && ty * tileSize < canvas.top + size.y; ++ty) {
         for (int tx = static_cast<int>(std::floor(canvas.left / tileSize)); tx * tileSize < canvas.left + size.x; ++tx) {
@@ -168,11 +233,11 @@ void drawMapCanvas(ShowState& s) {
             const ImVec2 b(a.x + tileSize, a.y + tileSize);
             if (tile.texture) draw->AddImage(static_cast<ImTextureID>(tile.texture), a, b, tile.uv0, tile.uv1);
             else draw->AddRect(a, b, IM_COL32(65, 80, 95, 255));
-            if (s.satellite && s.zoom >= 13 && !tile.satellite) aerialFallback = true;
+            if (s.zoom >= 13 && !tile.detailed) tileFallback = true;
         }
     }
 
-    const double margin = s.zoom >= 14 ? sectorLength + 8 : 10;
+    const double margin = s.zoom >= 14 ? s.sectorLength + 10 : 10;
     const double westX = (canvas.left - margin) / world, eastX = (canvas.left + size.x + margin) / world;
     const bool wholeWorld = eastX - westX >= 1;
     const auto visible = s.database.visibleMasts(wholeWorld ? -180 : longitude(westX),
@@ -180,14 +245,20 @@ void drawMapCanvas(ShowState& s) {
                         latitude((canvas.top - margin) / world), s.providerMask());
     std::vector<std::pair<float, size_t>> hits;
     size_t visibleAntennas = 0;
+    size_t visibleMasts = 0;
     const float mastRadius = s.zoom < 11 ? 2.0f : 4.0f;
     for (auto mastIndex : visible) {
         const auto& mast = s.database.masts()[mastIndex];
+        unsigned mastProviders = 0;
+        for (auto index : mast.antennas)
+            if (s.antennaOnMap(index)) mastProviders |= providerBit(s.database.antennas()[index].provider);
+        if (!(mastProviders & s.providerMask())) continue;
+        ++visibleMasts;
         // A single point per exact coordinate, irrespective of the antenna count.
         MapProvider first = MapProvider::Unspecified;
         unsigned companies = 0;
         for (auto p : {MapProvider::Sunrise, MapProvider::Swisscom, MapProvider::Salt, MapProvider::Unspecified}) {
-            if (mast.providers & s.providerMask() & providerBit(p)) {
+            if (mastProviders & s.providerMask() & providerBit(p)) {
                 if (!companies) first = p;
                 ++companies;
             }
@@ -199,12 +270,12 @@ void drawMapCanvas(ShowState& s) {
             const float centerDistance = std::hypot(io.MousePos.x - center.x, io.MousePos.y - center.y);
             for (auto index : mast.antennas) {
                 const auto& antenna = s.database.antennas()[index];
-                if (!(providerBit(antenna.provider) & s.providerMask())) continue;
-                if (s.zoom >= 14) drawSector(draw, antenna, center, false);
-                if (!clicked) continue;
+                if (!(providerBit(antenna.provider) & s.providerMask()) || !s.antennaOnMap(index)) continue;
+                if (s.zoom >= 14) drawSector(draw, antenna, center, s.sectorLength);
+                if (!hovered) continue;
                 float distance = centerDistance;
                 if (s.zoom >= 14 && std::isfinite(antenna.azimuth)) {
-                    const auto direction = antennaDirection(antenna.azimuth, sectorLength);
+                    const auto direction = antennaDirection(antenna.azimuth, s.sectorLength);
                     distance = segmentDistance(io.MousePos, center,
                         ImVec2(center.x + direction.first, center.y + direction.second));
                 }
@@ -212,18 +283,32 @@ void drawMapCanvas(ShowState& s) {
             }
         });
         for (auto index : mast.antennas)
-            if (providerBit(s.database.antennas()[index].provider) & s.providerMask()) ++visibleAntennas;
+            if ((providerBit(s.database.antennas()[index].provider) & s.providerMask()) && s.antennaOnMap(index)) ++visibleAntennas;
     }
-    // Selection is drawn last so co-located, identical azimuths cannot obscure it.
-    if (s.selected != noAntenna) {
-        const auto& selected = s.database.antennas()[s.selected];
-        const auto& mast = s.database.masts()[selected.mast];
-        if (providerBit(selected.provider) & s.providerMask())
-            canvas.forEachPosition(mast.longitude, mast.latitude, sectorLength + 10, [&](ImVec2 center) {
-                if (s.zoom >= 14) drawSector(draw, selected, center, true);
-                draw->AddCircle(center, 9, IM_COL32(255, 225, 70, 255), 0, 2.5f);
+    if (!hits.empty()) {
+        std::sort(hits.begin(), hits.end());
+        s.hover(hits.front().second);
+    } else if (hovered) s.hover(noAntenna);
+    const auto highlightAntennas = [&](bool hovering, ImU32 color) {
+        for (auto mastIndex : visible) {
+            const auto& mast = s.database.masts()[mastIndex];
+            std::vector<size_t> highlighted;
+            for (auto index : mast.antennas) {
+                if (!s.antennaOnMap(index) || !(providerBit(s.database.antennas()[index].provider) & s.providerMask())) continue;
+                const bool selected = s.isAntennaSelected(index);
+                if (hovering ? s.isAntennaHovered(index) && !selected : selected) highlighted.push_back(index);
+            }
+            if (highlighted.empty()) continue;
+            canvas.forEachPosition(mast.longitude, mast.latitude, s.sectorLength + 14, [&](ImVec2 center) {
+                if (s.zoom >= 14)
+                    for (auto index : highlighted) drawSector(draw, s.database.antennas()[index], center, s.sectorLength, color);
+                draw->AddCircle(center, hovering ? 13 : 9, color, 0, 2.5f);
             });
-    }
+        }
+    };
+    highlightAntennas(true, hoverColor);
+    // Selected rays remain visible where frequency groups share a direction.
+    highlightAntennas(false, selectedColor);
     for (const auto& point : mapPoints) {
         if (point.provider != MapProvider::Unspecified && !(providerBit(point.provider) & s.providerMask())) continue;
         canvas.forEachPosition(point.longitude, point.latitude, 6, [&](ImVec2 center) {
@@ -239,21 +324,27 @@ void drawMapCanvas(ShowState& s) {
         draw->AddCircle(center, 9, cyan, 0, 2);
         draw->AddText(ImVec2(center.x + 12, center.y - ImGui::GetFontSize() / 2), cyan, "You");
     });
+    const ImVec2 crosshair(origin.x + size.x / 2, origin.y + size.y / 2);
+    const float arm = std::max(8.0f, ImGui::GetFontSize() * 0.7f);
+    const ImU32 grey = IM_COL32(150, 150, 150, 140);
+    draw->AddLine(ImVec2(crosshair.x - arm, crosshair.y), ImVec2(crosshair.x + arm, crosshair.y), grey, 2);
+    draw->AddLine(ImVec2(crosshair.x, crosshair.y - arm), ImVec2(crosshair.x, crosshair.y + arm), grey, 2);
     draw->PopClipRect();
     draw->AddRect(origin, end, IM_COL32(80, 100, 120, 255));
+    ImGui::Text("Center: longitude %.6f   latitude %.6f", longitude(s.mapX), latitude(s.mapY));
     if (hovered) {
         ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
         const double pointerY = (canvas.top + io.MousePos.y - origin.y) / world;
-        ImGui::Text("Longitude: %.6f   Latitude: %.6f", longitude((canvas.left + io.MousePos.x - origin.x) / world), latitude(pointerY));
-    } else ImGui::TextUnformatted("Longitude: --   Latitude: --");
-    ImGui::Text("%zu visible masts / %zu antennas | Selected: yellow | User: cyan", visible.size(), visibleAntennas);
-    if (aerialFallback) {
-        const auto status = s.tiles.satelliteStatus();
-        ImGui::TextWrapped("%sOffline map shown where aerial tiles are unavailable.", status.c_str());
+        ImGui::Text("Cursor: longitude %.6f   latitude %.6f", longitude((canvas.left + io.MousePos.x - origin.x) / world), latitude(pointerY));
+    } else ImGui::TextUnformatted("Cursor: longitude --   latitude --");
+    ImGui::TextWrapped("%zu masts / %zu antennas | Selected: yellow | Hover: amber | User: cyan", visibleMasts, visibleAntennas);
+    if (s.onlyNearbyOnMap) ImGui::TextDisabled("Map restricted to nearby table results.");
+    if (tileFallback) {
+        const auto status = s.tiles.onlineStatus(s.satellite);
+        ImGui::TextWrapped("%sLower-resolution map shown until detailed tiles are available.", status.c_str());
     } else ImGui::TextDisabled("Map / aerial: (c) swisstopo | World: Natural Earth");
 
-    if (!hits.empty()) {
-        std::sort(hits.begin(), hits.end());
+    if (clicked && !hits.empty()) {
         const float closest = hits.front().first;
         s.pickCandidates.clear();
         for (const auto& hit : hits)

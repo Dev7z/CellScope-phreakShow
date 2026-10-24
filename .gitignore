@@ -22,3 +22,6 @@
 /ul_sample.raw
 __pycache__/
 /assets/satellite_cache/
+/assets/map_cache/
+
+/switzerland.db
