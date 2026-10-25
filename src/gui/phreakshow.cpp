@@ -19,6 +19,41 @@ ShowState& state() {
     return value;
 }
 
+bool buttonEllipsis(const char* label) {
+    const auto& style = ImGui::GetStyle();
+    const float width = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+    if (ImGui::CalcTextSize(label, nullptr, true).x + 2 * style.FramePadding.x <= width)
+        return ImGui::Button(label);
+    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(0, 0, 0, 0));
+    const bool pressed = ImGui::Button(label, ImVec2(width, 0));
+    ImGui::PopStyleColor();
+    const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+    ImGui::RenderTextEllipsis(ImGui::GetWindowDrawList(),
+        ImVec2(min.x + style.FramePadding.x, min.y + style.FramePadding.y),
+        ImVec2(max.x - style.FramePadding.x, max.y), max.x - style.FramePadding.x, label, nullptr, nullptr);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_ForTooltip))
+        ImGui::SetTooltip("%s", label);
+    return pressed;
+}
+
+bool checkboxEllipsis(const char* label, bool* value) {
+    const auto& style = ImGui::GetStyle();
+    const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+    const float labelOffset = ImGui::GetFrameHeight() + style.ItemInnerSpacing.x;
+    if (labelOffset + ImGui::CalcTextSize(label, nullptr, true).x <= ImGui::GetContentRegionAvail().x)
+        return ImGui::Checkbox(label, value);
+    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(0, 0, 0, 0));
+    const bool changed = ImGui::Checkbox(label, value);
+    ImGui::PopStyleColor();
+    const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+    ImGui::RenderTextEllipsis(ImGui::GetWindowDrawList(),
+        ImVec2(min.x + labelOffset, min.y + style.FramePadding.y),
+        ImVec2(right, max.y), right, label, nullptr, nullptr);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_ForTooltip))
+        ImGui::SetTooltip("%s", label);
+    return changed;
+}
+
 void drawAntennaRows(ShowState& s, const char* id, const std::vector<NearbyAntenna>& rows,
                     bool showDistance, float height) {
     const int columns = showDistance ? 7 : 6;
@@ -120,8 +155,8 @@ void drawDetails(ShowState& s) {
     }
     const auto& a = s.database.antennas()[s.selected];
     const auto& mast = s.database.masts()[a.mast];
-    ImGui::Text("Antenna %lld | %s", static_cast<long long>(a.id), providerName(a.provider));
-    if (ImGui::Button("Show selected on map")) s.center(mast.longitude, mast.latitude, 14);
+    ImGui::TextAligned(0, -FLT_MIN, "Antenna %lld | %s", static_cast<long long>(a.id), providerName(a.provider));
+    if (buttonEllipsis("Show selected on map")) s.center(mast.longitude, mast.latitude, 14);
     ImGui::SeparatorText("All database fields");
     const auto fieldValue = [&](const char* name) -> const char* {
         for (const auto& field : s.selectedFields)
@@ -129,22 +164,23 @@ void drawDetails(ShowState& s) {
         return "--";
     };
     ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.35f);
-    ImGui::TextWrapped("%s %s, %s | PCI: %s, %s MHz",
+    ImGui::TextAligned(0, -FLT_MIN, "%s %s, %s | PCI: %s, %s MHz",
         fieldValue("property.operator"), fieldValue("property.station"),
         fieldValue("property.technology"), fieldValue("property.pci"), fieldValue("property.frequency_mhz"));
     ImGui::PopFont();
     if (ImGui::BeginTable("antenna_fields", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
-                          ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY)) {
+                          ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY | ImGuiTableFlags_ScrollX |
+                          ImGuiTableFlags_SizingFixedFit)) {
         ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 15);
-        ImGui::TableSetupColumn("Value");
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed);
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableHeadersRow();
         for (const auto& field : s.selectedFields) {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::TextWrapped("%s", field.first.c_str());
+            ImGui::TextAligned(0, -FLT_MIN, "%s", field.first.c_str());
             ImGui::TableNextColumn();
-            ImGui::TextWrapped("%s", field.second.c_str());
+            ImGui::TextAligned(0, -FLT_MIN, "%s", field.second.c_str());
         }
         ImGui::EndTable();
     }
@@ -157,9 +193,11 @@ void drawColocated(ShowState& s) {
         ImGui::TextWrapped("Select an antenna to see the other antennas at its coordinates.");
     } else {
         const auto& mast = s.database.masts()[s.database.antennas()[s.selected].mast];
-        ImGui::Text("Longitude %.6f | Latitude %.6f", mast.longitude, mast.latitude);
+        ImGui::TextAligned(0, -FLT_MIN, "Longitude %.6f | Latitude %.6f", mast.longitude, mast.latitude);
         ImGui::Text("At this location: %zu antennas", mast.antennas.size());
-        ImGui::TextDisabled("Selecting a hidden company enables its map checkbox.");
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextAligned(0, -FLT_MIN, "Selecting a hidden company enables its map checkbox.");
+        ImGui::PopStyleColor();
         std::vector<NearbyAntenna> colocated;
         for (auto index : mast.antennas) colocated.push_back({index, 0});
         drawAntennaRows(s, "colocated", colocated, false);
@@ -206,13 +244,13 @@ void drawFrequencyRows(ShowState& s) {
 
 void drawNearby(ShowState& s, App& app) {
     if (!ImGui::Begin("Nearby antennas / tuning###PhreakShowNearby")) { ImGui::End(); return; }
-    ImGui::Text("CellScope center: %.4f MHz", app.centerFreqMHz);
+    ImGui::TextAligned(0, -FLT_MIN, "CellScope center: %.4f MHz", app.centerFreqMHz);
     const auto* antenna = s.selected == noAntenna ? nullptr : &s.database.antennas()[s.selected];
-    if (s.selectedFrequency) ImGui::Text("Selected frequency: %.4f MHz", *s.selectedFrequency);
-    else if (antenna) ImGui::Text("Selected: %s, %.4f MHz, PCI %lld", providerName(antenna->provider),
+    if (s.selectedFrequency) ImGui::TextAligned(0, -FLT_MIN, "Selected frequency: %.4f MHz", *s.selectedFrequency);
+    else if (antenna) ImGui::TextAligned(0, -FLT_MIN, "Selected: %s, %.4f MHz, PCI %lld", providerName(antenna->provider),
                              antenna->frequencyMHz, static_cast<long long>(antenna->pci));
     ImGui::BeginDisabled(!antenna || antenna->frequencyMHz <= 0);
-    if (ImGui::Button("Set CellScope center to selected antenna")) {
+    if (buttonEllipsis("Set CellScope center to selected antenna")) {
         if (app.active->running()) {
             retunePreserving(app, antenna->frequencyMHz);
             if (app.sourceMode == 1) app.wav.setCenterFreq(antenna->frequencyMHz * 1e6);
@@ -233,8 +271,8 @@ void drawNearby(ShowState& s, App& app) {
         ImGui::End();
         return;
     }
-    ImGui::Text("Longitude %.6f | Latitude %.6f", s.userLongitude, s.userLatitude);
-    ImGui::Checkbox("Only show these antennas on map", &s.onlyNearbyOnMap);
+    ImGui::TextAligned(0, -FLT_MIN, "Longitude %.6f | Latitude %.6f", s.userLongitude, s.userLatitude);
+    checkboxEllipsis("Only show these antennas on map", &s.onlyNearbyOnMap);
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 15);
     if (ImGui::Combo("Search", &s.nearestMode, "K nearest antennas\0All within radius\0")) s.nearestDirty = true;
     if (s.nearestMode == 0) {

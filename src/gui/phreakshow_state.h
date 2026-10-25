@@ -146,6 +146,9 @@ struct ShowState {
 ShowState& state();
 void loadDatabase(ShowState& state);
 void drawMapCanvas(ShowState& state);
+// Preserve widget behavior while fitting labels into narrow panes.
+bool buttonEllipsis(const char* label);
+bool checkboxEllipsis(const char* label, bool* value);
 // Shared antenna table used by co-located, nearby, and overlap-picking lists.
 void drawAntennaRows(ShowState& state, const char* id,
                     const std::vector<NearbyAntenna>& rows, bool showDistance,

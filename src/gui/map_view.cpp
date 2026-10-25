@@ -1,6 +1,8 @@
 #include "gui/phreakshow_state.h"
+#include "imgui_internal.h"
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 
 namespace phreakshow::detail {
 namespace {
@@ -70,34 +72,34 @@ void nextToPrevious(float right, const char* label, bool checkbox = false) {
 void navigationControls(ShowState& s) {
     ImGui::SeparatorText("Map controls");
     const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
-    if (ImGui::Button("+")) s.zoom = std::min(maxZoom, s.zoom + 1);
+    if (buttonEllipsis("+")) s.zoom = std::min(maxZoom, s.zoom + 1);
     nextToPrevious(right, "-");
-    if (ImGui::Button("-")) s.zoom = std::max(0, s.zoom - 1);
+    if (buttonEllipsis("-")) s.zoom = std::max(0, s.zoom - 1);
     nextToPrevious(right, "World");
-    if (ImGui::Button("World")) s.center(10, 35, 2);
+    if (buttonEllipsis("World")) s.center(10, 35, 2);
     nextToPrevious(right, "Switzerland");
-    if (ImGui::Button("Switzerland")) s.center(8.13, 46.8, 8);
+    if (buttonEllipsis("Switzerland")) s.center(8.13, 46.8, 8);
     nextToPrevious(right, "Basel SBB");
-    if (ImGui::Button("Basel SBB")) s.center(7.589772, 47.547480, 13);
+    if (buttonEllipsis("Basel SBB")) s.center(7.589772, 47.547480, 13);
     nextToPrevious(right, "Zoom 18");
     ImGui::Text("Zoom %d", s.zoom);
 
     for (auto p : {MapProvider::Sunrise, MapProvider::Swisscom, MapProvider::Salt}) {
         if (p != MapProvider::Sunrise) nextToPrevious(right, providerName(p), true);
         ImGui::PushStyleColor(ImGuiCol_Text, providerColor(p));
-        ImGui::Checkbox(providerName(p), &s.providers[static_cast<size_t>(p)]);
+        checkboxEllipsis(providerName(p), &s.providers[static_cast<size_t>(p)]);
         ImGui::PopStyleColor();
     }
     nextToPrevious(right, "Satellite / aerial", true);
     ImGui::BeginDisabled(s.zoom < 13);
-    ImGui::Checkbox("Satellite / aerial", &s.satellite);
+    checkboxEllipsis("Satellite / aerial", &s.satellite);
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("Available at zoom 13+. SWISSIMAGE aerial photography, cached locally.");
-    ImGui::SetNextItemWidth(std::max(ImGui::GetFontSize() * 5,
-        ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Azimuth line length").x - ImGui::GetStyle().ItemInnerSpacing.x));
-    ImGui::SliderFloat("Azimuth line length", &s.sectorLength, 8, 240, "%.0f px", ImGuiSliderFlags_AlwaysClamp);
-    ImGui::Checkbox("Map navigation with hotkeys", &s.mapHotkeys);
+    ImGui::TextAligned(0, -FLT_MIN, "Azimuth line length");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::SliderFloat("##azimuth_line_length", &s.sectorLength, 8, 240, "%.0f px", ImGuiSliderFlags_AlwaysClamp);
+    checkboxEllipsis("Map navigation with hotkeys", &s.mapHotkeys);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip(
         "Active while the map is focused or hovered, except while editing a field.\n"
         "WASD: pan | 1: Swisscom | 2: Sunrise | 3: Salt\n"
@@ -107,35 +109,64 @@ void navigationControls(ShowState& s) {
 
 void coordinateControls(ShowState& s) {
     ImGui::SeparatorText("Your coordinates");
-    const float width = std::max(ImGui::GetFontSize() * 7,
-        ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Longitude").x - ImGui::GetStyle().ItemInnerSpacing.x);
-    ImGui::SetNextItemWidth(width);
-    ImGui::InputDouble("Longitude", &s.inputLongitude, 0, 0, "%.6f");
-    ImGui::SetNextItemWidth(width);
-    ImGui::InputDouble("Latitude", &s.inputLatitude, 0, 0, "%.6f");
+    ImGui::TextAligned(0, -FLT_MIN, "Longitude");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputDouble("##longitude", &s.inputLongitude, 0, 0, "%.6f");
+    ImGui::TextAligned(0, -FLT_MIN, "Latitude");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputDouble("##latitude", &s.inputLatitude, 0, 0, "%.6f");
     const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
-    if (ImGui::Button("Set user point")) s.setUserPosition(s.inputLongitude, s.inputLatitude);
+    if (buttonEllipsis("Set user point")) s.setUserPosition(s.inputLongitude, s.inputLatitude);
     nextToPrevious(right, "Go to user");
     ImGui::BeginDisabled(!s.userPositionSet);
-    if (ImGui::Button("Go to user")) s.center(s.userLongitude, s.userLatitude, 13);
+    if (buttonEllipsis("Go to user")) s.center(s.userLongitude, s.userLatitude, 13);
     ImGui::EndDisabled();
     if (s.invalidUserPosition) ImGui::TextWrapped("Longitude must be -180..180, latitude -90..90.");
-    if (s.userPositionSet) ImGui::TextColored(ImVec4(.1f, 1, 1, 1), "User: %.6f, %.6f", s.userLongitude, s.userLatitude);
+    if (s.userPositionSet) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(.1f, 1, 1, 1));
+        ImGui::TextAligned(0, -FLT_MIN, "User: %.6f, %.6f", s.userLongitude, s.userLatitude);
+        ImGui::PopStyleColor();
+    }
+}
+
+// Keep native text editing, selection and caret behavior; only the idle display
+// uses ellipsis. Render the text separately so no shortened path reaches the buffer.
+void inputPath(const char* label, char* path, size_t capacity) {
+    const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text);
+    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(0, 0, 0, 0));
+    ImGui::InputText(label, path, capacity);
+    ImGui::PopStyleColor();
+    const ImVec2 padding = ImGui::GetStyle().FramePadding;
+    const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+    const ImVec2 start(min.x + padding.x, min.y + padding.y);
+    const ImVec2 end(max.x - padding.x, max.y - padding.y);
+    auto* draw = ImGui::GetWindowDrawList();
+    if (ImGui::IsItemActive()) {
+        const auto* input = ImGui::GetInputTextState(ImGui::GetItemID());
+        const ImVec4 clip(min.x, min.y, max.x, max.y);
+        draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
+            ImVec2(start.x - (input ? input->Scroll.x : 0), start.y), color, path, nullptr, 0, &clip);
+    } else {
+        ImGui::RenderTextEllipsis(draw, start, end, end.x, path, path + std::strlen(path), nullptr);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", path);
+    }
 }
 
 void databaseControls(ShowState& s) {
     ImGui::SeparatorText("Database");
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputText("##database_path", s.databasePath, sizeof(s.databasePath));
-    if (ImGui::Button("Load / reload database")) loadDatabase(s);
-    if (ImGui::Button("Retry map / aerial tiles")) s.tiles.retryOnline();
+    inputPath("##database_path", s.databasePath, sizeof(s.databasePath));
+    if (buttonEllipsis("Load / reload database")) loadDatabase(s);
+    if (buttonEllipsis("Retry map / aerial tiles")) s.tiles.retryOnline();
 }
 
 void toolbar(ShowState& s) {
     const float width = ImGui::GetContentRegionAvail().x, font = ImGui::GetFontSize();
-    const int columns = width >= font * 60 ? 3 : width >= font * 42 ? 2 : 1;
+    const int columns = width >= font * 42 ? 3 : width >= font * 28 ? 2 : 1;
+    // Each responsive layout keeps its own saved splitter positions.
+    ImGui::PushID(columns);
     if (ImGui::BeginTable("map_controls", columns, ImGuiTableFlags_SizingStretchProp |
-                          ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_NoSavedSettings)) {
+                          ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable)) {
         ImGui::TableSetupColumn("Navigation", ImGuiTableColumnFlags_WidthStretch, columns == 3 ? 46 : 55);
         if (columns > 1) ImGui::TableSetupColumn("Coordinates", ImGuiTableColumnFlags_WidthStretch, columns == 3 ? 28 : 45);
         if (columns == 3) ImGui::TableSetupColumn("Database", ImGuiTableColumnFlags_WidthStretch, 26);
@@ -147,6 +178,7 @@ void toolbar(ShowState& s) {
         databaseControls(s);
         ImGui::EndTable();
     }
+    ImGui::PopID();
     if (!s.database.error().empty()) ImGui::TextWrapped("Database: %s", s.database.error().c_str());
     if (!s.tiles.hasOfflineMap()) ImGui::TextWrapped("Offline tiles missing: place assets/map_tiles beside the executable.");
 }
@@ -184,7 +216,7 @@ bool keyboardNavigation(ShowState& s, bool canvasHovered) {
 void drawMapCanvas(ShowState& s) {
     toolbar(s);
     ImVec2 size = ImGui::GetContentRegionAvail();
-    const int footerLines = 5 + (s.onlyNearbyOnMap ? 1 : 0) + (size.x < ImGui::GetFontSize() * 45 ? 2 : 0);
+    const int footerLines = 4 + (s.onlyNearbyOnMap ? 1 : 0);
     size.y -= footerLines * ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
     if (size.x < 1 || size.y < 40) return;
     const ImVec2 origin = ImGui::GetCursorScreenPos();
@@ -326,23 +358,33 @@ void drawMapCanvas(ShowState& s) {
     });
     const ImVec2 crosshair(origin.x + size.x / 2, origin.y + size.y / 2);
     const float arm = std::max(8.0f, ImGui::GetFontSize() * 0.7f);
-    const ImU32 grey = IM_COL32(150, 150, 150, 140);
+    const ImU32 grey = IM_COL32(220, 220, 220, 255);
+    draw->AddLine(ImVec2(crosshair.x - arm, crosshair.y), ImVec2(crosshair.x + arm, crosshair.y), IM_COL32(20, 25, 30, 255), 4);
+    draw->AddLine(ImVec2(crosshair.x, crosshair.y - arm), ImVec2(crosshair.x, crosshair.y + arm), IM_COL32(20, 25, 30, 255), 4);
     draw->AddLine(ImVec2(crosshair.x - arm, crosshair.y), ImVec2(crosshair.x + arm, crosshair.y), grey, 2);
     draw->AddLine(ImVec2(crosshair.x, crosshair.y - arm), ImVec2(crosshair.x, crosshair.y + arm), grey, 2);
     draw->PopClipRect();
     draw->AddRect(origin, end, IM_COL32(80, 100, 120, 255));
-    ImGui::Text("Center: longitude %.6f   latitude %.6f", longitude(s.mapX), latitude(s.mapY));
+    ImGui::TextAligned(0, -FLT_MIN, "Center: longitude %.6f   latitude %.6f", longitude(s.mapX), latitude(s.mapY));
     if (hovered) {
         ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
         const double pointerY = (canvas.top + io.MousePos.y - origin.y) / world;
-        ImGui::Text("Cursor: longitude %.6f   latitude %.6f", longitude((canvas.left + io.MousePos.x - origin.x) / world), latitude(pointerY));
-    } else ImGui::TextUnformatted("Cursor: longitude --   latitude --");
-    ImGui::TextWrapped("%zu masts / %zu antennas | Selected: yellow | Hover: amber | User: cyan", visibleMasts, visibleAntennas);
-    if (s.onlyNearbyOnMap) ImGui::TextDisabled("Map restricted to nearby table results.");
+        ImGui::TextAligned(0, -FLT_MIN, "Cursor: longitude %.6f   latitude %.6f", longitude((canvas.left + io.MousePos.x - origin.x) / world), latitude(pointerY));
+    } else ImGui::TextAligned(0, -FLT_MIN, "Cursor: longitude --   latitude --");
+    ImGui::TextAligned(0, -FLT_MIN, "%zu masts / %zu antennas | Selected: yellow | Hover: amber | User: cyan", visibleMasts, visibleAntennas);
+    if (s.onlyNearbyOnMap) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextAligned(0, -FLT_MIN, "Map restricted to nearby table results.");
+        ImGui::PopStyleColor();
+    }
     if (tileFallback) {
         const auto status = s.tiles.onlineStatus(s.satellite);
-        ImGui::TextWrapped("%sLower-resolution map shown until detailed tiles are available.", status.c_str());
-    } else ImGui::TextDisabled("Map / aerial: (c) swisstopo | World: Natural Earth");
+        ImGui::TextAligned(0, -FLT_MIN, "%sLower-resolution map shown until detailed tiles are available.", status.c_str());
+    } else {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextAligned(0, -FLT_MIN, "Map / aerial: (c) swisstopo | World: Natural Earth");
+        ImGui::PopStyleColor();
+    }
 
     if (clicked && !hits.empty()) {
         const float closest = hits.front().first;
