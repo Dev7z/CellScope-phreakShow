@@ -140,6 +140,7 @@ struct LteEngine::Impl {
     std::thread               worker;
     std::atomic<bool>         run{false};
     std::atomic<EngineState>  st{EngineState::Idle};
+    std::mutex               feed_mtx; // serialize in-flight feed with restart/resampler setup
 
     mutable std::mutex        status_mtx;
     std::string               status = "Idle";
@@ -185,6 +186,29 @@ struct LteEngine::Impl {
     };
     std::map<uint16_t, VoiceTrack> vtrack;   // guarded by ue_mtx
     std::deque<CallEvent>          call_log;  // guarded by ue_mtx
+
+    // Called after decode workers have stopped, before starting a new session.
+    void clear_ue_state()
+    {
+        {
+            std::lock_guard<std::mutex> lock(ue_mtx);
+            ues.clear();
+            prev_bytes.clear();
+            ue_hist.clear();
+            watched.clear();
+            vtrack.clear();
+            conn_events.clear();
+            history_pts.clear();
+            call_log.clear();
+            decode_start_ms = 0;
+            last_rate_ms = 0;
+        }
+        {
+            std::lock_guard<std::mutex> lock(const_mtx);
+            const_pts.clear();
+            const_rnti = 0;
+        }
+    }
 
     void set_status(const std::string& s)
     {
@@ -1017,6 +1041,7 @@ void LteEngine::start(const EngineConfig& cfg)
     diagInstallCrashHandler();
     diagLog("LteEngine::start input_rate=" + std::to_string(cfg.input_sample_rate_hz) +
             " center_mhz=" + std::to_string(cfg.center_freq_mhz));
+    std::lock_guard<std::mutex> feedLock(impl_->feed_mtx);
     impl_->cfg = cfg;
 
     const double out_rate = SRSRAN_CS_SAMP_FREQ; // 1.92 MHz for search/MIB
@@ -1026,7 +1051,15 @@ void LteEngine::start(const EngineConfig& cfg)
         std::lock_guard<std::mutex> lk(impl_->ring_mtx);
         impl_->ring.clear();
     }
-    impl_->have_cell = false;
+    {
+        std::lock_guard<std::mutex> lock(impl_->cell_mtx);
+        impl_->have_cell = false;
+        impl_->cell_info = {};
+    }
+    impl_->clear_ue_state();
+    char startMessage[96];
+    std::snprintf(startMessage, sizeof(startMessage), "Decoding LTE DL @ %.4f MHz", cfg.center_freq_mhz);
+    impl_->push_traffic(now_ms(), 0, 0, "Status", startMessage, 0);
     impl_->run.store(true);
     impl_->st.store(EngineState::Searching);
     {
@@ -1062,6 +1095,7 @@ bool LteEngine::running() const
 
 void LteEngine::feed(const std::complex<float>* iq, std::size_t n)
 {
+    std::lock_guard<std::mutex> feedLock(impl_->feed_mtx);
     if (!impl_->run.load() || n == 0) {
         return;
     }
@@ -1106,6 +1140,17 @@ std::vector<TrafficMsg> LteEngine::drainTraffic()
     std::vector<TrafficMsg> v(impl_->traffic.begin(), impl_->traffic.end());
     impl_->traffic.clear();
     return v;
+}
+
+void LteEngine::clearUes()
+{
+    const bool restart = running();
+    const EngineConfig cfg = impl_->cfg;
+    // Rebuilding the decode pipeline also forgets the FALCON RNTI manager,
+    // MCS tracking, HARQ and queued subframes, rather than only the UI model.
+    stop();
+    if (restart) start(cfg);
+    else impl_->clear_ue_state();
 }
 
 std::vector<HistPoint> LteEngine::history() const

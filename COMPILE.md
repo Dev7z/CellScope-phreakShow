@@ -168,23 +168,59 @@ Enable **Count antennas at the same coordinates as one** to count K distinct
 locations while retaining every matching antenna at those locations. Each
 location gets its own table background shade. The option is disabled for
 radius searches, which show a cyan distance boundary around your user point.
+The **Order** column ranks distinct coordinates by distance, starting at 1;
+co-located antennas share the same number in either search mode. **Include
+indoor** is checked by default, with independent filters for nearby searches
+and the map. Indoor records are identified by `property.installation_type`.
+The map settings and map have a draggable horizontal divider. A second divider
+inside the settings separates navigation/coordinates/database from company
+filters and **Include indoor**. Coordinate actions sit beside the input fields,
+with a fixed separator between them. The Intercom/settings tab strip has a border;
+the aerial toggle sits beside the hotkey toggle. **X** toggles aerial imagery
+when map hotkeys are enabled and the zoom is at least 13. Map hotkeys are enabled by default.
 Selecting a row updates the same map selection and details. **Set CellScope
 center to selected antenna** transfers its exact MHz value to the primary radio;
 existing decoders are preserved. For WAV sources it changes the frequency label.
 
-The **settings** tab contains **BG music**. It starts
+The **settings** tab contains **BG music**, checked by default. At startup it plays
 `iknowyouregettingfasterbuticatchthemall.mp3` in a continuous loop; unchecking it
 stops playback. Keep the MP3 beside the executable (the build copies it there
 when present in the project root). Playback continues when you change tabs.
 The vendored miniaudio library handles MP3 decoding and audio output. If playback
 cannot start, hover the checkbox for the error and check the console output.
 
-**Satellite / aerial** is available at zoom 13 and above. It downloads official
-swisstopo SWISSIMAGE aerial tiles on a background thread and stores them in
+**Satellite / aerial** is available at zoom 13 and above. Basel and its nearby
+surroundings (7.52–7.67°E, 47.51–47.61°N) have bundled detailed maps and
+SWISSIMAGE aerial tiles in `assets/map_tiles/basel`, independent of the runtime
+caches. The 2,212 tiles cover zooms 13–16; zooms 17–18 enlarge those images
+without a network request. Outside this coverage, detailed map/aerial tiles
+are downloaded on a background thread into `assets/map_cache` and
 `assets/satellite_cache` beside the executable. Previously cached tiles work
 offline. Until imagery is ready, or outside available imagery, the offline map
-is shown. **Retry aerial tiles** retries failed requests. Service documentation:
+is shown. **Retry map / aerial tiles** retries failed requests. Service documentation:
 <https://docs.geo.admin.ch/visualize-data/xyz.html>.
+
+CellScope starts with **HackRF** selected and a **20 MHz** sample rate when
+there are no saved preferences. A saved device/rate still takes precedence.
+Press Enter in a center-frequency field to tune: the spectrum and waterfall
+ranges update immediately, and an active LTE decode is stopped and restarted
+at that frequency. Starting or restarting LTE adds **Decoding LTE DL @ ... MHz**
+to Traffic. **Autoscroll** follows the newest entries at the bottom of the log;
+uncheck it to read older entries. **Clear UEs** starts a fresh LTE scan at the same
+frequency, rebuilding the decoder so its RNTI, MCS and HARQ tracking is forgotten.
+It clears UE statistics, graph history, calls, pins and UE table filters together.
+The cell is briefly reacquired; subsequent decoded traffic repopulates the table,
+including RNTIs seen before the reset. When decoding is stopped, Clear UEs clears
+the stored session without starting a scan. Retuning an active LTE decode also
+clears pins and UE filters for the new frequency.
+
+UE RNTI text is green for the first five seconds after discovery, white if last
+seen less than three seconds ago, and gray after three seconds without traffic.
+Orange indicates the existing call-detection heuristic; an asterisk and green
+row background indicate a pinned UE. The **identity** column holds a decoded
+identifier (such as TMSI or IMSI) when one has been mapped to that RNTI. An empty
+cell means no identifier has been mapped. Hover **RNTI colors / identity (?)**
+in UEs for the same explanation.
 
 Drag the CellScope or phreakShow workspace tabs to reorder, split or detach
 them. The three phreakShow panel tabs can also be moved independently. On

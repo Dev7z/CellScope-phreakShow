@@ -56,12 +56,13 @@ bool checkboxEllipsis(const char* label, bool* value) {
 
 void drawAntennaRows(ShowState& s, const char* id, const std::vector<NearbyAntenna>& rows,
                     bool showDistance, float height, bool colorByCoordinates) {
-    const int columns = showDistance ? 7 : 6;
+    const int columns = showDistance ? 8 : 6;
     const float scale = ImGui::GetFontSize() / 13.0f;
     if (!ImGui::BeginTable(id, columns, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_ScrollY | ImGuiTableFlags_ScrollX | ImGuiTableFlags_Resizable,
-                          ImVec2(0, height), (showDistance ? 535.0f : 475.0f) * scale)) return;
+                          ImVec2(0, height), (showDistance ? 595.0f : 475.0f) * scale)) return;
     ImGui::TableSetupScrollFreeze(1, 1);
+    if (showDistance) ImGui::TableSetupColumn("Order", ImGuiTableColumnFlags_WidthFixed, 60 * scale);
     ImGui::TableSetupColumn("Company", ImGuiTableColumnFlags_WidthFixed, 80 * scale);
     ImGui::TableSetupColumn("MHz", ImGuiTableColumnFlags_WidthFixed, 75 * scale);
     ImGui::TableSetupColumn("PCI", ImGuiTableColumnFlags_WidthFixed, 42 * scale);
@@ -79,12 +80,18 @@ void drawAntennaRows(ShowState& s, const char* id, const std::vector<NearbyAnten
             ImGui::PushID(static_cast<int>(index));
             ImGui::TableNextRow();
             if (colorByCoordinates) {
-                // A dark palette with 262,144 distinct shades, rather than a
-                // short repeating stripe pattern. Co-located rows share a key.
-                const size_t shade = s.nearbyCoordinateGroups[a.mast] * 4051u;
+                // Reverse six bits to spread consecutive locations across 64
+                // distinct blue shades, with a strong jump between neighbors.
+                const size_t group = s.nearbyCoordinateGroups[a.mast];
+                unsigned reversed = 0;
+                for (unsigned bit = 0; bit < 6; ++bit) reversed = (reversed << 1) | ((group >> bit) & 1u);
+                const unsigned shade = 26 + 2 * reversed;
                 ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
-                    IM_COL32(16 + (shade & 63), 24 + ((shade >> 6) & 63),
-                             96 + ((shade >> 12) & 63), 255));
+                    IM_COL32(shade / 4, shade / 2, shade, 255));
+            }
+            if (showDistance) {
+                ImGui::TableNextColumn();
+                ImGui::Text("%zu", s.nearbyCoordinateGroups[a.mast] + 1);
             }
             ImGui::TableNextColumn();
             const bool selected = s.isAntennaSelected(index);
@@ -264,21 +271,23 @@ void drawNearby(ShowState& s, App& app) {
                              antenna->frequencyMHz, static_cast<long long>(antenna->pci));
     ImGui::BeginDisabled(!antenna || antenna->frequencyMHz <= 0);
     if (buttonEllipsis("Set CellScope center to selected antenna")) {
-        if (app.active->running()) {
-            retunePreserving(app, antenna->frequencyMHz);
-            if (app.sourceMode == 1) app.wav.setCenterFreq(antenna->frequencyMHz * 1e6);
-        } else app.centerFreqMHz = antenna->frequencyMHz;
-        app.viewA.resetView = true;
+        setCenterFrequency(app, antenna->frequencyMHz);
         s.tuneStatus = "CellScope center set to " + std::to_string(antenna->frequencyMHz) + " MHz.";
         if (app.sourceMode == 1) s.tuneStatus += " WAV frequency label updated.";
     }
     ImGui::EndDisabled();
     if (!s.tuneStatus.empty()) ImGui::TextWrapped("%s", s.tuneStatus.c_str());
     ImGui::SeparatorText("From your coordinates");
+    const float filterRight = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
     for (auto p : {MapProvider::Sunrise, MapProvider::Swisscom, MapProvider::Salt}) {
         if (p != MapProvider::Sunrise) ImGui::SameLine();
         if (ImGui::Checkbox(providerName(p), &s.nearbyProviders[static_cast<size_t>(p)])) s.nearestDirty = true;
     }
+    const float indoorWidth = ImGui::CalcTextSize("Include indoor").x + ImGui::GetFrameHeight() +
+                              ImGui::GetStyle().ItemInnerSpacing.x + ImGui::GetStyle().ItemSpacing.x;
+    if (ImGui::GetItemRectMax().x + indoorWidth < filterRight)
+        ImGui::SameLine();
+    if (ImGui::Checkbox("Include indoor", &s.nearbyIncludeIndoor)) s.nearestDirty = true;
     if (!s.userPositionSet) {
         ImGui::TextWrapped("Enter longitude and latitude in Map, then click Set user point.");
         ImGui::End();
@@ -330,23 +339,24 @@ void drawNearby(ShowState& s, App& app) {
     ImGui::End();
 }
 
-void drawSettings(ShowState& s) {
-    bool enabled = s.backgroundMusic.enabled();
-    if (ImGui::Checkbox("BG music", &enabled)) {
-        std::filesystem::path musicPath;
-        if (enabled) {
-            constexpr const char* filename = "iknowyouregettingfasterbuticatchthemall.mp3";
-            for (const auto& path : {executableDirectory() / filename,
-                                     std::filesystem::path(filename),
-                                     std::filesystem::path(PHREAKSHOW_MUSIC_PATH)}) {
-                if (std::filesystem::exists(path)) {
-                    musicPath = path;
-                    break;
-                }
+void applyBackgroundMusic(ShowState& s) {
+    std::filesystem::path musicPath;
+    if (s.backgroundMusicEnabled) {
+        constexpr const char* filename = "iknowyouregettingfasterbuticatchthemall.mp3";
+        for (const auto& path : {executableDirectory() / filename,
+                                 std::filesystem::path(filename),
+                                 std::filesystem::path(PHREAKSHOW_MUSIC_PATH)}) {
+            if (std::filesystem::exists(path)) {
+                musicPath = path;
+                break;
             }
         }
-        s.backgroundMusic.setEnabled(enabled, musicPath);
     }
+    s.backgroundMusic.setEnabled(s.backgroundMusicEnabled, musicPath);
+}
+
+void drawSettings(ShowState& s) {
+    if (ImGui::Checkbox("BG music", &s.backgroundMusicEnabled)) applyBackgroundMusic(s);
     if (!s.backgroundMusic.error().empty() && ImGui::IsItemHovered())
         ImGui::SetTooltip("%s", s.backgroundMusic.error().c_str());
 }
@@ -356,6 +366,10 @@ void drawSettings(ShowState& s) {
 void drawPhreakShow(App& app) {
     using namespace phreakshow::detail;
     auto& s = state();
+    if (!s.backgroundMusicInitialized) {
+        s.backgroundMusicInitialized = true;
+        applyBackgroundMusic(s);
+    }
     locateDatabase(s);
     s.tiles.beginFrame();
     const bool visible = ImGui::Begin("phreakShow###PhreakShowWorkspace", nullptr,
@@ -382,6 +396,7 @@ void drawPhreakShow(App& app) {
     }
     bool intercomVisible = false;
     if (visible && ImGui::BeginTabBar("PhreakShowTabs")) {
+        const ImRect tabBarBounds = GImGui->CurrentTabBar->BarRect;
         if (ImGui::BeginTabItem("Intercom")) {
             s.intercomActive = intercomVisible = true;
             ImGui::DockSpace(dock, ImVec2(0, 0));
@@ -393,6 +408,8 @@ void drawPhreakShow(App& app) {
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
+        ImGui::GetWindowDrawList()->AddRect(tabBarBounds.Min, tabBarBounds.Max,
+                                           ImGui::GetColorU32(ImGuiCol_Border));
     }
     if (!intercomVisible) ImGui::DockSpace(dock, ImVec2(0, 0), ImGuiDockNodeFlags_KeepAliveOnly);
     ImGui::End();

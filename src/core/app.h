@@ -64,8 +64,8 @@ struct App
 #ifdef HAS_LIBRESDR
     LibreSdrSource  libre;
 #endif
-    SdrSource*      active = &sdr;
-    int  sourceMode = 0; // 0=RTL, 1=WAV, 2=SDR++ Server, 3=HackRF, 4=Dual RTL, 5=Airspy, 6=LibreSDR
+    SdrSource*      active = &hack;
+    int  sourceMode = 3; // 0=RTL, 1=WAV, 2=SDR++ Server, 3=HackRF, 4=Dual RTL, 5=Airspy, 6=LibreSDR
     char wavPath[512] = "";
     bool wavLoop = true;
     char serverHost[128] = "localhost";
@@ -75,7 +75,7 @@ struct App
     double serverSampleRateMHz = 2.0;
 
     // HackRF
-    double hackSampleRateMHz = 10.0;
+    double hackSampleRateMHz = 20.0;
     int    hackLna = 16;
     int    hackVga = 16;
     bool   hackAmp = false;
@@ -153,6 +153,7 @@ struct App
     char   lteUeFilter[64]      = "";   // filter UEs by RNTI/identity
     char   lteTrafficFilter[64] = "";   // filter Traffic by RNTI/text
     bool   lteTrafficWatchedOnly = false;
+    bool   lteTrafficAutoScroll = true;
     bool   lteUeCallsOnly        = false; // show only UEs on a detected call
 #endif
 

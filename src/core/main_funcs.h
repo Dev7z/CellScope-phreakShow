@@ -15,6 +15,8 @@ void updateRateChange(App&);
 // voice/voice_ops.cpp
 void retuneActive(App&, double centerMHz);
 void retunePreserving(App&, double centerMHz);
+// Commit a center-frequency edit and immediately update both display ranges.
+void setCenterFrequency(App&, double centerMHz);
 
 // session/session.cpp
 void startActive(App&);

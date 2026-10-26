@@ -48,7 +48,7 @@ private:
     SdrSampleCb cb_;
 
     double centerFreq_ = 1545.0e6;
-    double sampleRate_ = 10.0e6;
+    double sampleRate_ = 20.0e6;
     double ppm_ = 0.0;
     int    lnaGain_ = 16;
     int    vgaGain_ = 16;

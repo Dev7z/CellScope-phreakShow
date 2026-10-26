@@ -17,15 +17,15 @@ int main(int argc, char** argv) {
         CREATE TABLE switzerland (PK INTEGER PRIMARY KEY, longitude REAL, latitude REAL,
             "property.operator" TEXT, "property.frequency_mhz" INTEGER,
             "property.azimuth_deg" INTEGER, "property.pci" INTEGER, "property.site_id" INTEGER,
-            "property.station" TEXT);
+            "property.station" TEXT, "property.installation_type" TEXT);
         INSERT INTO switzerland VALUES
-            (1, 8, 47, 'Sunrise', 791.2, 160, 389, 12766, 'A'),
-            (2, 8, 47, 'Sunrise', 796, 230, 328, 12766, 'B'),
-            (3, 8, 47, 'Swisscom', 2135, 0, 18, 50, 'C'),
-            (4, 8.01, 47, 'Salt', 3649.98, NULL, NULL, NULL, 'D'),
-            (5, 9, 48, 'Salt', 1800, 450, 8, 88, 'E'),
-            (6, NULL, 47, 'Sunrise', 900, 0, 9, 90, 'Invalid'),
-            (7, 8, 95, 'Swisscom', 900, 0, 9, 90, 'Invalid');
+            (1, 8, 47, 'Sunrise', 791.2, 160, 389, 12766, 'A', 'Outdoor'),
+            (2, 8, 47, 'Sunrise', 796, 230, 328, 12766, 'B', 'Indoor'),
+            (3, 8, 47, 'Swisscom', 2135, 0, 18, 50, 'C', NULL),
+            (4, 8.01, 47, 'Salt', 3649.98, NULL, NULL, NULL, 'D', 'indoor'),
+            (5, 9, 48, 'Salt', 1800, 450, 8, 88, 'E', 'Outdoor'),
+            (6, NULL, 47, 'Sunrise', 900, 0, 9, 90, 'Invalid', 'Outdoor'),
+            (7, 8, 95, 'Swisscom', 900, 0, 9, 90, 'Invalid', 'Outdoor');
     )SQL";
     assert(sqlite3_exec(db, sql, nullptr, nullptr, nullptr) == SQLITE_OK);
     sqlite3_close(db);
@@ -79,10 +79,22 @@ int main(int argc, char** argv) {
         assert(antennas.nearest(8, 47, all, 0, 0, true).size() == 3);
         assert(antennas.nearest(8, 47, all, 0, 1, true).size() == 4);
         assert(antennas.nearest(8, 47, all, 2, 0, true).size() == 3);
+        // Indoor filtering happens before K ranking and coordinate expansion.
+        assert(!antennas.antennas()[0].indoor && antennas.antennas()[1].indoor);
+        assert(!antennas.antennas()[2].indoor && antennas.antennas()[3].indoor);
+        const auto outdoor = antennas.nearest(8, 47, all, 0, unlimited, false, false);
+        assert(outdoor.size() == 3);
+        for (const auto& row : outdoor) assert(!antennas.antennas()[row.antenna].indoor);
+        assert(antennas.nearest(8, 47, all, 0, 1, false, false).size() == 2);
+        const auto outdoorSalt = antennas.nearest(8, 47, salt, 1, unlimited, true, false);
+        assert(outdoorSalt.size() == 1 && outdoorSalt[0].antenna == 4);
+        const auto outdoorGroups = antennas.nearest(8, 47, all, 2, unlimited, true, false);
+        assert(outdoorGroups.size() == 3 && outdoorGroups.back().antenna == 4);
+        assert(antennas.nearest(8, 47, all, 0, 0, true, false).size() == 2);
         const auto fields = antennas.details(0);
-        assert(fields.size() == 9);
+        assert(fields.size() == 10);
         assert(fields[0] == std::make_pair(std::string("PK"), std::string("1")));
-        assert(fields.back().second == "A");
+        assert(fields[8].second == "A");
         assert(antennas.details(noAntenna).empty());
         assert(!antennas.open(fixture.string() + ".missing"));
         assert(antennas.antennas().empty());
@@ -121,6 +133,11 @@ int main(int argc, char** argv) {
         assert(real.antennas().size() == 244823);
         assert(real.masts().size() == 20259);
         assert(real.skippedRows() == 0);
+        const unsigned allProviders = providerBit(MapProvider::Sunrise) | providerBit(MapProvider::Swisscom) |
+                                      providerBit(MapProvider::Salt) | providerBit(MapProvider::Unspecified);
+        const auto allOutdoors = real.nearest(7.587123, 47.560173, allProviders, 0,
+            std::numeric_limits<double>::infinity(), false, false);
+        assert(allOutdoors.size() == 219046);
         const auto rows = real.nearest(8.393766, 46.827407,
             providerBit(MapProvider::Sunrise), 1);
         assert(rows.size() == 1 && rows[0].distanceKm == 0);

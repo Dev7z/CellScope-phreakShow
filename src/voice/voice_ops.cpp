@@ -67,3 +67,41 @@ void retunePreserving(App& app, double centerMHz)
     for (auto& k : keep)
         app.decoders.addDecoder(k.first * 1e6, k.second);
 }
+
+void setCenterFrequency(App& app, double centerMHz)
+{
+    if (!std::isfinite(centerMHz) || centerMHz <= 0) return;
+#ifdef HAS_LTE
+    const bool restartLte = app.lteRunning && app.active->running();
+    if (restartLte) app.lteEngine.stop();
+#endif
+    app.centerFreqMHz = centerMHz;
+    if (app.active->running()) {
+        if (app.sourceMode == 1) app.wav.setCenterFreq(centerMHz * 1e6);
+        else retunePreserving(app, centerMHz);
+    }
+    const double fs = app.active->sampleRate();
+    auto& view = app.viewA;
+    if (view.curN > 0) {
+        updateFreqAxis(view, centerMHz * 1e6, fs, view.curN);
+        view.viewXminMHz = view.freqMHz.front();
+        view.viewXmaxMHz = view.freqMHz.back();
+        std::fill(view.avg.begin(), view.avg.end(), app.dbMin);
+        std::fill(view.inst.begin(), view.inst.end(), app.dbMin);
+    }
+    view.ring.clear();
+    view.waterfall.clear();
+    view.resetView = true;
+    view.fftSkip = false;
+#ifdef HAS_LTE
+    if (restartLte) {
+        app.lteWatched.clear();
+        app.lteUeFilter[0] = '\0';
+        app.lteUeCallsOnly = false;
+        cellscope::lte::EngineConfig cfg;
+        cfg.input_sample_rate_hz = fs;
+        cfg.center_freq_mhz = centerMHz;
+        app.lteEngine.start(cfg);
+    }
+#endif
+}

@@ -128,6 +128,9 @@ public:
     bool cell(CellInfo& out) const;
 
     std::vector<UeStat>     snapshotUes() const;   // copy of current UE table
+    // Forget the current session, including RNTI tracking and graph history.
+    // If decoding is active, restart cell acquisition at the same configuration.
+    void                   clearUes();
     std::vector<TrafficMsg> drainTraffic();        // moves out pending messages
 
     // Cell-wide DL throughput + active-UE time series for plotting.

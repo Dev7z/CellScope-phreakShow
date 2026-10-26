@@ -21,6 +21,7 @@ struct Antenna {
     double azimuth = std::numeric_limits<double>::quiet_NaN();
     int64_t pci = -1;
     int64_t siteId = -1;
+    bool indoor = false;
 };
 
 struct Mast {
@@ -63,7 +64,8 @@ public:
     std::vector<NearbyAntenna> nearest(double longitude, double latitude,
                                      unsigned providers, size_t k,
                                      double radiusKm = std::numeric_limits<double>::infinity(),
-                                     bool countCoordinatesOnce = false) const;
+                                     bool countCoordinatesOnce = false,
+                                     bool includeIndoor = true) const;
     std::vector<std::pair<std::string, std::string>> details(size_t antenna);
 private:
     sqlite3* db_ = nullptr;

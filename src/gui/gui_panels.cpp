@@ -86,6 +86,15 @@ static void beginStartActive(App& app)
     startActive(app);
 }
 
+static void centerFrequencyInput(App& app, const char* label)
+{
+    double editedMHz = app.centerFreqMHz;
+    if (ImGui::InputDouble(label, &editedMHz, 0.1, 1.0, "%.4f",
+                          ImGuiInputTextFlags_EnterReturnsTrue))
+        setCenterFrequency(app, editedMHz);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Press Enter to tune and restart an active LTE decode.");
+}
+
 void drawControls(App& app)
 {
     ImGui::Begin((std::string(_L("Control")) + "###Control").c_str());
@@ -150,6 +159,10 @@ void drawControls(App& app)
     {
         if (ImGui::Button(_L("Stop"), ImVec2(120, 0)))
         {
+#ifdef HAS_LTE
+            app.lteEngine.stop();
+            app.lteRunning = false;
+#endif
             app.active->stop();
             app.decoders.stop();
             app.decoders.removeAll();
@@ -234,12 +247,7 @@ void drawControls(App& app)
             ImGui::TextDisabled("No RTL-SDR devices. Click Refresh.");
         }
 
-        if (ImGui::InputDouble("Center (MHz)", &app.centerFreqMHz, 0.1, 1.0, "%.4f"))
-        {
-            app.viewA.resetView = true;
-            if (running)
-                app.sdr.setCenterFreq(app.centerFreqMHz * 1e6);
-        }
+        centerFrequencyInput(app, "Center (MHz)");
         if (ImGui::Combo(_L("Sample rate (MHz)"), &app.sampleRateIdx, kRateLabels, kNumRates))
         {
             app.viewA.resetView = true;
@@ -289,8 +297,7 @@ void drawControls(App& app)
             if (running)
                 app.wav.setLoop(app.wavLoop);
         }
-        if (ImGui::InputDouble("Center label (MHz)", &app.centerFreqMHz, 0.1, 1.0, "%.4f"))
-            app.viewA.resetView = true;
+        centerFrequencyInput(app, "Center label (MHz)");
 
         if (running)
         {
@@ -311,12 +318,7 @@ void drawControls(App& app)
         ImGui::Checkbox("Compression (zstd)", &app.serverCompression);
         ImGui::EndDisabled();
 
-        if (ImGui::InputDouble("Center (MHz)", &app.centerFreqMHz, 0.1, 1.0, "%.4f"))
-        {
-            app.viewA.resetView = true;
-            if (running)
-                app.server.setCenterFreq(app.centerFreqMHz * 1e6);
-        }
+        centerFrequencyInput(app, "Center (MHz)");
 
         // Sample-rate combo, populated from the server's source-module UI once
         // connected. Selecting one drives the server's rate via a UI action.
@@ -380,12 +382,7 @@ void drawControls(App& app)
             }
         }
 
-        if (ImGui::InputDouble("Center (MHz)", &app.centerFreqMHz, 0.1, 1.0, "%.4f"))
-        {
-            app.viewA.resetView = true;
-            if (running)
-                app.hack.setCenterFreq(app.centerFreqMHz * 1e6);
-        }
+        centerFrequencyInput(app, "Center (MHz)");
         if (ImGui::InputDouble("Sample rate (MHz)", &app.hackSampleRateMHz, 1.0, 2.0, "%.3f"))
         {
             if (app.hackSampleRateMHz < 2.0) app.hackSampleRateMHz = 2.0;
@@ -442,12 +439,7 @@ void drawControls(App& app)
             }
         }
 
-        if (ImGui::InputDouble("Center (MHz)", &app.centerFreqMHz, 0.1, 1.0, "%.4f"))
-        {
-            app.viewA.resetView = true;
-            if (running)
-                app.airspy.setCenterFreq(app.centerFreqMHz * 1e6);
-        }
+        centerFrequencyInput(app, "Center (MHz)");
         if (ImGui::Combo(_L("Sample rate (MHz)"), &app.airspySampleRateIdx, kAirspyRateLabels, kAirspyNumRates))
         {
             app.viewA.resetView = true;
@@ -545,12 +537,7 @@ void drawControls(App& app)
         ImGui::InputText("FPGA image", app.libreFpgaPath, sizeof(app.libreFpgaPath));
         ImGui::EndDisabled();
 
-        if (ImGui::InputDouble("Center (MHz)", &app.centerFreqMHz, 0.1, 1.0, "%.4f"))
-        {
-            app.viewA.resetView = true;
-            if (running)
-                app.libre.setCenterFreq(app.centerFreqMHz * 1e6);
-        }
+        centerFrequencyInput(app, "Center (MHz)");
         if (ImGui::InputDouble("Sample rate (MHz)", &app.libreSampleRateMHz, 0.5, 1.0, "%.3f"))
         {
             if (app.libreSampleRateMHz < 0.2) app.libreSampleRateMHz = 0.2;
@@ -613,8 +600,7 @@ void drawControls(App& app)
                 ImGui::EndCombo();
             }
         }
-        if (ImGui::InputDouble("Center A (MHz)", &app.centerFreqMHz, 0.1, 1.0, "%.4f"))
-            app.viewA.resetView = true;
+        centerFrequencyInput(app, "Center A (MHz)");
         ImGui::Combo("Rate A (MHz)", &app.sampleRateIdx, kRateLabels, kNumRates);
         if (ImGui::Checkbox("Auto gain A", &app.autoGain)) {}
         if (!app.autoGain)
@@ -1598,12 +1584,31 @@ void drawLteUes(App& app)
     ImGui::SameLine();
     if (ImGui::SmallButton("Clear pins")) app.lteWatched.clear();
     ImGui::SameLine();
+    if (ImGui::SmallButton("Clear UEs")) {
+        app.lteEngine.clearUes();
+        app.lteWatched.clear();
+        app.lteEngine.setWatched({});
+        app.lteUeFilter[0] = '\0';
+        app.lteUeCallsOnly = false;
+        ues.clear();
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip(
+        "Forget UEs, decoder RNTIs, graph history, pins and table filters.\n"
+        "An active LTE decode restarts at the same frequency and reacquires the cell.");
+    ImGui::SameLine();
     ImGui::Checkbox("Calls only", &app.lteUeCallsOnly);
     int activeCalls = 0;
     for (auto& u : ues) if (u.voice) activeCalls++;
     ImGui::SameLine();
     ImGui::Text("UEs: %d   Pinned: %d   Calls: %d", (int)ues.size(), (int)app.lteWatched.size(), activeCalls);
     ImGui::TextDisabled("Click a row to pin/unpin it (tracks it on the chart).");
+    ImGui::TextDisabled("RNTI colors / identity (?)");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip(
+        "Green: first seen less than 5 seconds ago.\n"
+        "White: last seen less than 3 seconds ago. Gray: no traffic for 3+ seconds.\n"
+        "Orange: a call detected by grant cadence. * / green row: pinned.\n"
+        "Identity: a decoded TMSI/IMSI/IMEI or contention-resolution identifier, when available.\n"
+        "A blank identity means none has been mapped to this RNTI; it is not a phone number.");
 
     // Apply text filter.
     std::string filt = lower(app.lteUeFilter);
@@ -1738,7 +1743,9 @@ void drawLteTraffic(App& app)
     namespace lte = cellscope::lte;
 
     static std::deque<lte::TrafficMsg> log;
-    for (auto& m : app.lteEngine.drainTraffic())
+    auto pending = app.lteEngine.drainTraffic();
+    const bool newMessages = !pending.empty();
+    for (auto& m : pending)
         log.push_back(m);
     while (log.size() > 500)
         log.pop_front();
@@ -1753,6 +1760,8 @@ void drawLteTraffic(App& app)
     ImGui::SameLine();
     ImGui::Checkbox("Pinned only", &app.lteTrafficWatchedOnly);
     ImGui::SameLine();
+    const bool scrollChanged = ImGui::Checkbox("Autoscroll", &app.lteTrafficAutoScroll);
+    ImGui::SameLine();
     if (ImGui::SmallButton("Clear")) log.clear();
 
     std::string filt = lower(app.lteTrafficFilter);
@@ -1760,12 +1769,14 @@ void drawLteTraffic(App& app)
     ImGui::Text("Traffic (%d)", (int)log.size());
     if (ImGui::BeginChild("lte_traffic", ImVec2(0, 0), true))
     {
-        for (auto it = log.rbegin(); it != log.rend(); ++it)
+        for (auto it = log.begin(); it != log.end(); ++it)
         {
-            if (app.lteTrafficWatchedOnly && !app.lteWatched.count(it->rnti))
+            if (app.lteTrafficWatchedOnly && it->rnti != 0 && !app.lteWatched.count(it->rnti))
                 continue;
             char line[192];
-            std::snprintf(line, sizeof(line), "[%s] 0x%04X %s  %s (%u B)",
+            if (it->channel == "Status")
+                std::snprintf(line, sizeof(line), "%s", it->summary.c_str());
+            else std::snprintf(line, sizeof(line), "[%s] 0x%04X %s  %s (%u B)",
                           it->direction == 0 ? "DL" : "UL", it->rnti,
                           it->channel.c_str(), it->summary.c_str(), it->len);
             if (!filt.empty() && lower(line).find(filt) == std::string::npos)
@@ -1776,6 +1787,7 @@ void drawLteTraffic(App& app)
             else
                 ImGui::TextUnformatted(line);
         }
+        if (app.lteTrafficAutoScroll && (newMessages || scrollChanged)) ImGui::SetScrollHereY(1.0f);
     }
     ImGui::EndChild();
 
@@ -1939,10 +1951,8 @@ bool drawDockHost(App& app)
     ImGui::End();
     // Also recover workspaces that were detached in an older saved layout.
     ImGui::SetNextWindowDockID(workspaceDock, ImGuiCond_Always);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     const bool showCellScope = ImGui::Begin("CellScope###CellScopeWorkspace", nullptr,
         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-    ImGui::PopStyleVar();
     ImGui::DockSpace(dockId, ImVec2(0, 0), showCellScope ? 0 : ImGuiDockNodeFlags_KeepAliveOnly);
     ImGui::End();
     ImGui::SetNextWindowDockID(workspaceDock, ImGuiCond_Always);

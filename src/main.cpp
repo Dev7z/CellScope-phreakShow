@@ -157,7 +157,7 @@ int main(int, char**)
 
     buildWindow(app.viewA, kFftSizes[app.fftSizeIdx], app.dbMin);
     buildWindow(app.viewB, kFftSizes[app.fftSizeIdx], app.dbMin);
-    app.devices = app.sdr.listDevices();
+    app.devices = app.sourceMode == 3 ? app.hack.listDevices() : app.sdr.listDevices();
     app.verCheck.start("cellscope", CELLSCOPE_VERSION);
     scanBandPlans(app.bandPlanDir, app.bandPlanNames, app.bandPlanPaths);
     if (app.bandPlanIdx >= 0 && app.bandPlanIdx < (int)app.bandPlanPaths.size())

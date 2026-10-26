@@ -142,6 +142,7 @@ struct MapTiles::Impl {
     };
     std::filesystem::path offlineRoot, satelliteRoot, mapRoot;
     std::map<std::string, Texture> textures;
+    std::map<std::string, int> bundledSources;
     std::mutex mutex;
     std::condition_variable wake;
     std::deque<std::string> requests;
@@ -179,8 +180,13 @@ struct MapTiles::Impl {
             Download result{key, {}, {}};
             const bool aerial = key.rfind("sat/", 0) == 0;
             const auto path = (aerial ? satelliteRoot : mapRoot) / (key.substr(4) + ".jpeg");
-            Bytes encoded = readFile(path);
+            // Shipped assets always take precedence over disposable caches.
+            Bytes encoded = readFile(offlineRoot / "basel" / (key + ".jpeg"));
             result.pixels = decodeJpeg(encoded);
+            if (result.pixels.empty()) {
+                encoded = readFile(path);
+                result.pixels = decodeJpeg(encoded);
+            }
             if (result.pixels.empty() && curl) {
                 encoded.clear();
                 // Official XYZ endpoint: https://docs.geo.admin.ch/visualize-data/xyz.html
@@ -245,6 +251,25 @@ struct MapTiles::Impl {
         return id;
     }
 
+    int bundledSourceZoom(int z, int x, int y, bool aerial) {
+        const std::string prefix = aerial ? "sat/" : "map/";
+        const std::string key = prefix + std::to_string(z) + "/" + std::to_string(x) + "/" + std::to_string(y);
+        const auto found = bundledSources.find(key);
+        if (found != bundledSources.end()) return found->second;
+        int source = -1;
+        if (!offlineRoot.empty()) {
+            for (int level = std::min(z, 16); level >= 13; --level) {
+                const int factor = 1 << (z - level);
+                const auto path = offlineRoot / "basel" / (prefix + std::to_string(level) + "/" +
+                    std::to_string(x / factor) + "/" + std::to_string(y / factor) + ".jpeg");
+                std::error_code ec;
+                if (std::filesystem::is_regular_file(path, ec)) { source = level; break; }
+            }
+        }
+        bundledSources.emplace(key, source);
+        return source;
+    }
+
     GLuint online(int z, int x, int y, bool aerial) {
         const std::string key = std::string(aerial ? "sat/" : "map/") + std::to_string(z) + "/" + std::to_string(x) + "/" + std::to_string(y);
         const auto found = textures.find(key);
@@ -295,8 +320,20 @@ void MapTiles::beginFrame() {
 MapTile MapTiles::image(int zoom, int x, int y, bool satellite) {
     if (!impl_ || zoom < 0 || zoom > 20 || x < 0 || y < 0 || x >= (1 << zoom) || y >= (1 << zoom)) return {};
     if (zoom >= 13) {
-        const GLuint id = impl_->online(zoom, x, y, satellite);
-        if (id) return {id, {0, 0}, {1, 1}, satellite, true};
+        const int bundledZoom = impl_->bundledSourceZoom(zoom, x, y, satellite);
+        if (bundledZoom >= 13) {
+            // Zooms 17/18 enlarge the shipped zoom-16 imagery without making
+            // any network request, even when the runtime caches are empty.
+            const int factor = 1 << (zoom - bundledZoom);
+            const GLuint id = impl_->online(bundledZoom, x / factor, y / factor, satellite);
+            if (id) {
+                const float u = static_cast<float>(x % factor) / factor, v = static_cast<float>(y % factor) / factor;
+                return {id, {u, v}, {u + 1.0f / factor, v + 1.0f / factor}, satellite, true};
+            }
+        } else {
+            const GLuint id = impl_->online(zoom, x, y, satellite);
+            if (id) return {id, {0, 0}, {1, 1}, satellite, true};
+        }
         // A cached parent can bridge the gap while exact-resolution tiles load.
         for (int sourceZoom = zoom - 1; sourceZoom >= 13; --sourceZoom) {
             const int factor = 1 << (zoom - sourceZoom);

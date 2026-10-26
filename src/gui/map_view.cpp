@@ -124,37 +124,41 @@ void navigationControls(ShowState& s) {
     nextToPrevious(right, "Zoom 18");
     ImGui::Text("Zoom %d", s.zoom);
 
-    for (auto p : {MapProvider::Sunrise, MapProvider::Swisscom, MapProvider::Salt}) {
-        if (p != MapProvider::Sunrise) nextToPrevious(right, providerName(p), true);
-        ImGui::PushStyleColor(ImGuiCol_Text, providerColor(p));
-        checkboxEllipsis(providerName(p), &s.providers[static_cast<size_t>(p)]);
-        ImGui::PopStyleColor();
-    }
-    nextToPrevious(right, "Satellite / aerial", true);
-    ImGui::BeginDisabled(s.zoom < 13);
-    checkboxEllipsis("Satellite / aerial", &s.satellite);
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        ImGui::SetTooltip("Available at zoom 13+. SWISSIMAGE aerial photography, cached locally.");
     ImGui::TextAligned(0, -FLT_MIN, "Azimuth line length");
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::SliderFloat("##azimuth_line_length", &s.sectorLength, 8, 240, "%.0f px", ImGuiSliderFlags_AlwaysClamp);
-    checkboxEllipsis("Map navigation with hotkeys", &s.mapHotkeys);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip(
-        "Active while the map is focused or hovered, except while editing a field.\n"
-        "WASD: pan | 1: Swisscom | 2: Sunrise | 3: Salt\n"
-        "Q/E: shorten/lengthen azimuth lines | +/-: zoom\n"
-        "C: user point at map center | V: user point at mouse (over map)");
+    if (ImGui::BeginTable("navigation_toggles", 2, ImGuiTableFlags_SizingStretchSame)) {
+        ImGui::TableNextColumn();
+        checkboxEllipsis("Map navigation with hotkeys", &s.mapHotkeys);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(
+            "Active while the map is focused or hovered, except while editing a field.\n"
+            "WASD: pan | 1: Swisscom | 2: Sunrise | 3: Salt\n"
+            "Q/E: shorten/lengthen azimuth lines | +/-: zoom | X: aerial (zoom 13+)\n"
+            "C: user point at map center | V: user point at mouse (over map)");
+        ImGui::TableNextColumn();
+        ImGui::BeginDisabled(s.zoom < 13);
+        checkboxEllipsis("Satellite / aerial", &s.satellite);
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Available at zoom 13+. Basel aerial coverage is bundled for offline use.");
+        ImGui::EndTable();
+    }
 }
 
 void coordinateControls(ShowState& s) {
     ImGui::SeparatorText("Your coordinates");
+    if (!ImGui::BeginTable("user_coordinates", 2, ImGuiTableFlags_BordersInnerV |
+                          ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings)) return;
+    ImGui::TableSetupColumn("Position", ImGuiTableColumnFlags_WidthStretch, 45);
+    ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthStretch, 55);
+    ImGui::TableNextColumn();
     ImGui::TextAligned(0, -FLT_MIN, "Longitude");
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::InputDouble("##longitude", &s.inputLongitude, 0, 0, "%.6f");
     ImGui::TextAligned(0, -FLT_MIN, "Latitude");
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::InputDouble("##latitude", &s.inputLatitude, 0, 0, "%.6f");
+    ImGui::TableNextColumn();
     const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
     if (buttonEllipsis("Set user point")) s.setUserPosition(s.inputLongitude, s.inputLatitude);
     nextToPrevious(right, "Go to user");
@@ -167,6 +171,7 @@ void coordinateControls(ShowState& s) {
         ImGui::TextAligned(0, -FLT_MIN, "User: %.6f, %.6f", s.userLongitude, s.userLatitude);
         ImGui::PopStyleColor();
     }
+    ImGui::EndTable();
 }
 
 // Keep native text editing, selection and caret behavior; only the idle display
@@ -230,6 +235,7 @@ bool keyboardNavigation(ShowState& s, bool canvasHovered) {
         ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) return false;
     if (ImGui::IsKeyPressed(ImGuiKey_Equal) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) s.zoom = std::min(maxZoom, s.zoom + 1);
     if (ImGui::IsKeyPressed(ImGuiKey_Minus) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) s.zoom = std::max(0, s.zoom - 1);
+    if (s.zoom >= 13 && ImGui::IsKeyPressed(ImGuiKey_X, false)) s.satellite = !s.satellite;
     const float seconds = std::clamp(io.DeltaTime, 0.0f, 0.1f);
     const float lineDelta = (ImGui::IsKeyDown(ImGuiKey_E) ? 1.0f : 0.0f) - (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.0f : 0.0f);
     s.sectorLength = std::clamp(s.sectorLength + lineDelta * 100 * seconds, 8.0f, 240.0f);
@@ -253,8 +259,7 @@ bool keyboardNavigation(ShowState& s, bool canvasHovered) {
 }
 } // namespace
 
-void drawMapCanvas(ShowState& s) {
-    toolbar(s);
+void drawMapContent(ShowState& s) {
     ImVec2 size = ImGui::GetContentRegionAvail();
     const int footerLines = 4 + (s.onlyNearbyOnMap ? 1 : 0);
     size.y -= footerLines * ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
@@ -448,5 +453,56 @@ void drawMapCanvas(ShowState& s) {
         if (ImGui::Button("Done")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
+}
+
+namespace {
+void verticalSplitter(const char* id, float& topHeight, float availableHeight, float minimumTop, float minimumBottom) {
+    const float thickness = std::max(5.0f, ImGui::GetStyle().ItemSpacing.y);
+    ImGui::InvisibleButton(id, ImVec2(std::max(1.0f, ImGui::GetContentRegionAvail().x), thickness));
+    const bool active = ImGui::IsItemActive();
+    if (active || ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+    if (active) topHeight = std::clamp(topHeight + ImGui::GetIO().MouseDelta.y,
+        minimumTop, std::max(minimumTop, availableHeight - minimumBottom));
+    ImGui::GetWindowDrawList()->AddRectFilled(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
+        ImGui::GetColorU32(active ? ImGuiCol_SeparatorActive : ImGui::IsItemHovered()
+            ? ImGuiCol_SeparatorHovered : ImGuiCol_Separator));
+}
+}
+
+void drawMapCanvas(ShowState& s) {
+    const float line = ImGui::GetFrameHeightWithSpacing();
+    const float available = ImGui::GetContentRegionAvail().y;
+    const float minimumSettings = line * 3;
+    const float minimumMap = line * 7; // reserve the canvas, footer, padding and divider
+    if (s.mapSettingsHeight <= 0) s.mapSettingsHeight = line * 9;
+    const float settingsHeight = std::clamp(s.mapSettingsHeight, std::min(minimumSettings, available * .4f),
+        std::max(minimumSettings, available - minimumMap));
+    s.mapSettingsHeight = settingsHeight;
+    if (ImGui::BeginChild("map_settings", ImVec2(0, settingsHeight), ImGuiChildFlags_AlwaysUseWindowPadding)) {
+        const float controlsAvailable = ImGui::GetContentRegionAvail().y;
+        if (s.mapControlsHeight <= 0) s.mapControlsHeight = line * 6.5f;
+        const float controlsHeight = std::clamp(s.mapControlsHeight, line,
+            std::max(line, controlsAvailable - line * 2.3f));
+        s.mapControlsHeight = controlsHeight;
+        if (ImGui::BeginChild("map_controls_top", ImVec2(0, controlsHeight))) toolbar(s);
+        ImGui::EndChild();
+        verticalSplitter("settings_splitter", s.mapControlsHeight, controlsAvailable, line, line * 2.3f);
+        if (ImGui::BeginChild("map_filters", ImVec2(0, 0))) {
+            const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+            for (auto p : {MapProvider::Sunrise, MapProvider::Swisscom, MapProvider::Salt}) {
+                if (p != MapProvider::Sunrise) nextToPrevious(right, providerName(p), true);
+                ImGui::PushStyleColor(ImGuiCol_Text, providerColor(p));
+                checkboxEllipsis(providerName(p), &s.providers[static_cast<size_t>(p)]);
+                ImGui::PopStyleColor();
+            }
+            nextToPrevious(right, "Include indoor", true);
+            checkboxEllipsis("Include indoor", &s.includeIndoor);
+        }
+        ImGui::EndChild();
+    }
+    ImGui::EndChild();
+    verticalSplitter("map_settings_splitter", s.mapSettingsHeight, available, minimumSettings, minimumMap);
+    if (ImGui::BeginChild("map_view", ImVec2(0, 0), ImGuiChildFlags_AlwaysUseWindowPadding)) drawMapContent(s);
+    ImGui::EndChild();
 }
 } // namespace phreakshow::detail

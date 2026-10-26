@@ -65,6 +65,9 @@ void cfgWriteAll(App& app, ImGuiTextBuffer* buf)
     WI(showBandPlan); WI(bandPlanIdx); WI(showBandPlanB); WI(bandPlanIdxB); WS(bandPlanDir);
     WI(layoutVersion);
     WI(fontSize);
+#ifdef HAS_LTE
+    WI(lteTrafficAutoScroll);
+#endif
     if (app.saveDecoders)
     {
         for (auto& sd : app.savedDecoders)
@@ -97,6 +100,9 @@ void cfgReadLine(App& app, const char* line)
 #define RD(f) if (!std::strcmp(key, #f)) { app.f = std::atof(val); return; }
 #define RS(f) if (!std::strcmp(key, #f)) { std::strncpy(app.f, val, sizeof(app.f) - 1); app.f[sizeof(app.f) - 1] = 0; return; }
     RI(sourceMode); RI(deviceIndex); RI(sampleRateIdx); RI(newBaud); RI(fftSizeIdx);
+#ifdef HAS_LTE
+    RB(lteTrafficAutoScroll);
+#endif
     RB(autoAddLes); RI(maxLesAutoDecoders);
     RD(centerFreqMHz);
     RF(iqBufferSec);

@@ -50,7 +50,8 @@ bool AntennaDatabase::open(const std::filesystem::path& path) {
     sqlite3_busy_timeout(db_, 1000);
     sqlite3_stmt* statement = nullptr;
     const char* sql = R"SQL(SELECT "PK", longitude, latitude, "property.operator",
-        "property.frequency_mhz", "property.azimuth_deg", "property.pci", "property.site_id"
+        "property.frequency_mhz", "property.azimuth_deg", "property.pci", "property.site_id",
+        "property.installation_type"
         FROM switzerland ORDER BY longitude, latitude, "PK")SQL";
     if (sqlite3_prepare_v2(db_, sql, -1, &statement, nullptr) != SQLITE_OK) {
         error_ = sqlite3_errmsg(db_);
@@ -86,6 +87,8 @@ bool AntennaDatabase::open(const std::filesystem::path& path) {
         }
         if (sqlite3_column_type(statement, 6) != SQLITE_NULL) antenna.pci = sqlite3_column_int64(statement, 6);
         if (sqlite3_column_type(statement, 7) != SQLITE_NULL) antenna.siteId = sqlite3_column_int64(statement, 7);
+        const auto* installation = sqlite3_column_text(statement, 8);
+        antenna.indoor = installation && sqlite3_stricmp(reinterpret_cast<const char*>(installation), "Indoor") == 0;
         masts_.back().providers |= providerBit(provider);
         masts_.back().antennas.push_back(antennas_.size());
         antennas_.push_back(antenna);
@@ -117,7 +120,7 @@ std::vector<size_t> AntennaDatabase::visibleMasts(double west, double east, doub
 
 std::vector<NearbyAntenna> AntennaDatabase::nearest(double longitude, double latitude,
                                                   unsigned providers, size_t k, double radiusKm,
-                                                  bool countCoordinatesOnce) const {
+                                                  bool countCoordinatesOnce, bool includeIndoor) const {
     std::vector<NearbyAntenna> rows;
     if (!validMapCoordinates(longitude, latitude) || std::isnan(radiusKm) || radiusKm < 0) return rows;
     const bool grouped = countCoordinatesOnce && k != 0;
@@ -126,7 +129,8 @@ std::vector<NearbyAntenna> AntennaDatabase::nearest(double longitude, double lat
         const double distance = distanceKm(longitude, latitude, mast.longitude, mast.latitude);
         if (distance > radiusKm) continue;
         for (size_t index : mast.antennas) {
-            if (!(providerBit(antennas_[index].provider) & providers)) continue;
+            if (!(providerBit(antennas_[index].provider) & providers) ||
+                (!includeIndoor && antennas_[index].indoor)) continue;
             rows.push_back({index, distance});
             // The first matching PK represents this coordinate for ranking.
             if (grouped) break;
@@ -144,7 +148,8 @@ std::vector<NearbyAntenna> AntennaDatabase::nearest(double longitude, double lat
         std::vector<NearbyAntenna> expanded;
         for (const auto& row : rows)
             for (size_t index : masts_[antennas_[row.antenna].mast].antennas)
-                if (providerBit(antennas_[index].provider) & providers)
+                if ((providerBit(antennas_[index].provider) & providers) &&
+                    (includeIndoor || !antennas_[index].indoor))
                     expanded.push_back({index, row.distanceKm});
         return expanded;
     }

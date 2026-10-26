@@ -20,18 +20,24 @@ struct FrequencyGroup {
 struct ShowState {
     bool intercomActive = true;
     BackgroundMusic backgroundMusic;
+    bool backgroundMusicEnabled = true;
+    bool backgroundMusicInitialized = false;
     AntennaDatabase database;
     MapTiles tiles;
     bool databaseLocated = false;
     char databasePath[1024] = "switzerland.db";
     std::array<bool, 4> providers{false, true, true, true};
     std::array<bool, 4> nearbyProviders{false, true, true, true};
+    bool includeIndoor = true;
+    bool nearbyIncludeIndoor = true;
+    float mapSettingsHeight = 0;
+    float mapControlsHeight = 0;
     double mapX = 0.5 + 8.13 / 360.0;
     double mapY = mercatorY(46.8);
     int zoom = 8;
     bool satellite = false;
     float sectorLength = 52;
-    bool mapHotkeys = false;
+    bool mapHotkeys = true;
     bool dragged = false;
     double inputLongitude = defaultUserLongitude, inputLatitude = defaultUserLatitude;
     double userLongitude = defaultUserLongitude, userLatitude = defaultUserLatitude;
@@ -85,7 +91,8 @@ struct ShowState {
         return hoveredFrame >= ImGui::GetFrameCount() - 1 ? hovered : noAntenna;
     }
     bool antennaOnMap(size_t index) const {
-        return !onlyNearbyOnMap || isNearby(index);
+        return (includeIndoor || !database.antennas()[index].indoor) &&
+               (!onlyNearbyOnMap || isNearby(index));
     }
     bool isNearby(size_t index) const {
         return userPositionSet && index < nearbyOnMap.size() && nearbyOnMap[index];
@@ -102,7 +109,7 @@ struct ShowState {
         nearby = userPositionSet ? database.nearest(userLongitude, userLatitude, nearbyProviderMask(),
             nearestMode == 0 ? nearestCount : 0,
             nearestMode == 0 ? std::numeric_limits<double>::infinity() : radiusKm,
-            nearestMode == 0 && countCoordinatesOnce) : std::vector<NearbyAntenna>{};
+            nearestMode == 0 && countCoordinatesOnce, nearbyIncludeIndoor) : std::vector<NearbyAntenna>{};
         nearbyOnMap.assign(database.antennas().size(), false);
         nearbyCoordinateGroups.assign(database.masts().size(), noAntenna);
         nearbyCoordinateCount = 0;
