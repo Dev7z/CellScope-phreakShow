@@ -21,6 +21,7 @@ else()
 endif()
 find_package(CURL REQUIRED)
 find_package(JPEG REQUIRED)
+find_package(Threads REQUIRED)
 find_package(PkgConfig)
 
 find_package(glfw3 CONFIG QUIET)
@@ -126,8 +127,16 @@ endif()
 # ---------------------------------------------------------------------------
 # CellScope application
 # ---------------------------------------------------------------------------
+add_library(miniaudio STATIC third_party/miniaudio/miniaudio.c)
+target_include_directories(miniaudio PUBLIC ${CMAKE_SOURCE_DIR}/third_party/miniaudio)
+target_link_libraries(miniaudio PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+if(UNIX)
+    target_link_libraries(miniaudio PUBLIC m)
+endif()
+
 add_executable(CellScope-phreakShow
     src/main.cpp
+    src/audio/background_music.cpp
     src/signal/processing.cpp
     src/voice/voice_ops.cpp
     src/gui/gui_panels.cpp
@@ -162,7 +171,15 @@ target_include_directories(CellScope-phreakShow PRIVATE
 target_compile_definitions(CellScope-phreakShow PRIVATE _USE_MATH_DEFINES)
 target_compile_definitions(CellScope-phreakShow PRIVATE
     PHREAKSHOW_TILE_DIR="${CMAKE_SOURCE_DIR}/assets/map_tiles"
+    PHREAKSHOW_MUSIC_PATH="${CMAKE_SOURCE_DIR}/iknowyouregettingfasterbuticatchthemall.mp3"
     PHREAKSHOW_DATABASE_PATH="${CMAKE_SOURCE_DIR}/switzerland.db")
+if(EXISTS "${CMAKE_SOURCE_DIR}/iknowyouregettingfasterbuticatchthemall.mp3" AND NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+    add_custom_command(TARGET CellScope-phreakShow POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/iknowyouregettingfasterbuticatchthemall.mp3"
+                "$<TARGET_FILE_DIR:CellScope-phreakShow>/iknowyouregettingfasterbuticatchthemall.mp3"
+        COMMENT "Copying background music")
+endif()
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
     add_custom_command(TARGET CellScope-phreakShow POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -191,7 +208,7 @@ endif()
 find_library(ZSTD_LIBRARIES NAMES zstd libzstd REQUIRED)
 find_library(ZLIB_LIB NAMES z libz zlib REQUIRED)
 
-target_link_libraries(CellScope-phreakShow PRIVATE imgui ${PHREAKSHOW_SQLITE_TARGET} CURL::libcurl JPEG::JPEG
+target_link_libraries(CellScope-phreakShow PRIVATE imgui miniaudio ${PHREAKSHOW_SQLITE_TARGET} CURL::libcurl JPEG::JPEG
     ${ZLIB_LIB} ${RTLSDR_LIBRARIES} ${HACKRF_LIBRARIES} ${ZSTD_LIBRARIES})
 if(AIRSPY_FOUND)
     target_link_libraries(CellScope-phreakShow PRIVATE ${AIRSPY_LIBRARIES})

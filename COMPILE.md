@@ -144,7 +144,7 @@ executable afterwards. The build copies it beside the executable when present.
 The map opens it read-only; it never adds indexes or changes records. You can
 also enter a different database path under **Your coordinates / database**.
 
-Select the **phreakShow** workspace. Below zoom 14, each visible coordinate gets
+Select the **phreakShow** workspace and its **Intercom** tab. Below zoom 14, each visible coordinate gets
 one mast marker if any antenna there belongs to an enabled company. Sunrise is
 red, Swisscom blue, Salt green, and shared masts white. At zoom 14 and above,
 each enabled antenna gets a direction line: 0 degrees points north, 90 east.
@@ -164,9 +164,20 @@ yellow. **Show selected on map** centers it at zoom 14.
 The nearby panel searches either **K nearest antennas** or **All within radius**
 (kilometers). It honors company checkboxes, retains separate antenna records at
 the same mast, and sorts by great-circle distance from your saved coordinates.
+Enable **Count antennas at the same coordinates as one** to count K distinct
+locations while retaining every matching antenna at those locations. Each
+location gets its own table background shade. The option is disabled for
+radius searches, which show a cyan distance boundary around your user point.
 Selecting a row updates the same map selection and details. **Set CellScope
 center to selected antenna** transfers its exact MHz value to the primary radio;
 existing decoders are preserved. For WAV sources it changes the frequency label.
+
+The **settings** tab contains **BG music**. It starts
+`iknowyouregettingfasterbuticatchthemall.mp3` in a continuous loop; unchecking it
+stops playback. Keep the MP3 beside the executable (the build copies it there
+when present in the project root). Playback continues when you change tabs.
+The vendored miniaudio library handles MP3 decoding and audio output. If playback
+cannot start, hover the checkbox for the error and check the console output.
 
 **Satellite / aerial** is available at zoom 13 and above. It downloads official
 swisstopo SWISSIMAGE aerial tiles on a background thread and stores them in

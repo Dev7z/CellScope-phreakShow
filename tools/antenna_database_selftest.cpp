@@ -1,8 +1,10 @@
 #include "gui/antenna_database.h"
+#include "gui/map_projection.h"
 #include <sqlite3.h>
 #include <cassert>
 #include <chrono>
 #include <iostream>
+#include <set>
 
 using namespace phreakshow;
 
@@ -54,6 +56,29 @@ int main(int argc, char** argv) {
         assert(antennas.nearest(8, 47, salt, 1)[0].antenna == 3);
         assert(antennas.nearest(8, 47, 0, 0).empty());
         assert(antennas.nearest(0, 91, all, 0).empty());
+        const double unlimited = std::numeric_limits<double>::infinity();
+        const auto firstCoordinate = antennas.nearest(8, 47, all, 1, unlimited, true);
+        assert(firstCoordinate.size() == 3);
+        for (const auto& row : firstCoordinate) {
+            assert(antennas.antennas()[row.antenna].mast == 0);
+            assert(row.distanceKm == 0);
+        }
+        const auto twoCoordinates = antennas.nearest(8, 47, all, 2, unlimited, true);
+        assert(twoCoordinates.size() == 4);
+        std::set<size_t> coordinates;
+        for (const auto& row : twoCoordinates) coordinates.insert(antennas.antennas()[row.antenna].mast);
+        assert(coordinates.size() == 2);
+        // Filtering happens before counting coordinates and expanding rows.
+        const auto sunriseGroup = antennas.nearest(8, 47, sunrise, 1, unlimited, true);
+        assert(sunriseGroup.size() == 2);
+        const auto saltGroups = antennas.nearest(8, 47, salt, 2, unlimited, true);
+        assert(saltGroups.size() == 2 && saltGroups[0].antenna == 3 && saltGroups[1].antenna == 4);
+        assert(antennas.nearest(8, 47, all, 100, unlimited, true).size() == 5);
+        assert(antennas.nearest(8, 47, 0, 1, unlimited, true).empty());
+        // Radius queries ignore coordinate counting, including a zero radius.
+        assert(antennas.nearest(8, 47, all, 0, 0, true).size() == 3);
+        assert(antennas.nearest(8, 47, all, 0, 1, true).size() == 4);
+        assert(antennas.nearest(8, 47, all, 2, 0, true).size() == 3);
         const auto fields = antennas.details(0);
         assert(fields.size() == 9);
         assert(fields[0] == std::make_pair(std::string("PK"), std::string("1")));
@@ -68,6 +93,18 @@ int main(int argc, char** argv) {
     assert(distanceKm(8, 47, 8, 47) == 0);
     assert(std::abs(distanceKm(0, 0, 1, 0) - 111.19508) < 0.001);
     assert(std::abs(distanceKm(179.9, 0, -179.9, 0) - 22.239) < 0.001);
+    // Every radius-outline point must lie on the search's distance boundary,
+    // including at the antimeridian and near the poles.
+    for (const auto& center : {std::make_pair(7.587123, 47.560173),
+                               std::make_pair(179.99, 0.0), std::make_pair(30.0, 84.9)}) {
+        for (double radius : {0.0, 0.25, 2.0, 500.0, 15000.0}) {
+            for (int bearing = 0; bearing < 360; bearing += 15) {
+                const auto point = coordinateAtDistance(center.first, center.second, bearing, radius);
+                assert(validMapCoordinates(point.first, point.second));
+                assert(std::abs(distanceKm(center.first, center.second, point.first, point.second) - radius) < 1e-7);
+            }
+        }
+    }
     for (double az : {0.0, 90.0, 180.0, 270.0}) {
         const auto direction = antennaDirection(az, 52);
         assert(std::abs(std::hypot(direction.first, direction.second) - 52) < 1e-9);
@@ -88,6 +125,18 @@ int main(int argc, char** argv) {
             providerBit(MapProvider::Sunrise), 1);
         assert(rows.size() == 1 && rows[0].distanceKm == 0);
         assert(real.details(rows[0].antenna).size() == 21);
+        const auto groups = real.nearest(8.393766, 46.827407,
+            providerBit(MapProvider::Sunrise), 50, std::numeric_limits<double>::infinity(), true);
+        std::set<size_t> groupMasts;
+        for (const auto& row : groups) groupMasts.insert(real.antennas()[row.antenna].mast);
+        assert(groupMasts.size() == 50 && groups.size() > 50);
+        for (auto mast : groupMasts) {
+            size_t expected = 0, actual = 0;
+            for (auto antenna : real.masts()[mast].antennas)
+                if (real.antennas()[antenna].provider == MapProvider::Sunrise) ++expected;
+            for (const auto& row : groups) if (real.antennas()[row.antenna].mast == mast) ++actual;
+            assert(expected == actual);
+        }
         assert(std::filesystem::last_write_time(argv[1]) == before);
         std::cout << "Real database: " << real.antennas().size() << " antennas, "
                   << real.masts().size() << " unique masts loaded in "

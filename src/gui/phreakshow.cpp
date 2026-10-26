@@ -55,7 +55,7 @@ bool checkboxEllipsis(const char* label, bool* value) {
 }
 
 void drawAntennaRows(ShowState& s, const char* id, const std::vector<NearbyAntenna>& rows,
-                    bool showDistance, float height) {
+                    bool showDistance, float height, bool colorByCoordinates) {
     const int columns = showDistance ? 7 : 6;
     const float scale = ImGui::GetFontSize() / 13.0f;
     if (!ImGui::BeginTable(id, columns, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
@@ -78,18 +78,29 @@ void drawAntennaRows(ShowState& s, const char* id, const std::vector<NearbyAnten
             const auto& a = s.database.antennas()[index];
             ImGui::PushID(static_cast<int>(index));
             ImGui::TableNextRow();
+            if (colorByCoordinates) {
+                // A dark palette with 262,144 distinct shades, rather than a
+                // short repeating stripe pattern. Co-located rows share a key.
+                const size_t shade = s.nearbyCoordinateGroups[a.mast] * 4051u;
+                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
+                    IM_COL32(16 + (shade & 63), 24 + ((shade >> 6) & 63),
+                             96 + ((shade >> 12) & 63), 255));
+            }
             ImGui::TableNextColumn();
             const bool selected = s.isAntennaSelected(index);
-            ImGui::PushStyleColor(ImGuiCol_Header, selected ? IM_COL32(190, 150, 25, 180) : IM_COL32(140, 85, 10, 180));
-            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, selected ? IM_COL32(210, 170, 30, 210) : IM_COL32(140, 85, 10, 210));
-            ImGui::PushStyleColor(ImGuiCol_HeaderActive, IM_COL32(230, 190, 45, 230));
+            ImGui::PushStyleColor(ImGuiCol_Header, colorByCoordinates ? 0 : selected ? IM_COL32(190, 150, 25, 180) : IM_COL32(140, 85, 10, 180));
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, colorByCoordinates ? 0 : selected ? IM_COL32(210, 170, 30, 210) : IM_COL32(140, 85, 10, 210));
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive, colorByCoordinates ? 0 : IM_COL32(230, 190, 45, 230));
             if (ImGui::Selectable(providerName(a.provider), selected || s.isAntennaHovered(index),
                                   ImGuiSelectableFlags_SpanAllColumns)) s.select(index);
             ImGui::PopStyleColor(3);
             const bool rowHovered = ImGui::IsItemHovered();
             if (rowHovered) s.hover(index);
-            // Use distinct, explicit row colors in every antenna table.
-            if (s.isAntennaSelected(index) || rowHovered)
+            // Preserve each coordinate's background when highlighting a row.
+            if (colorByCoordinates && (s.isAntennaSelected(index) || s.isAntennaHovered(index)))
+                ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
+                    s.isAntennaSelected(index) ? IM_COL32(255, 225, 70, 255) : IM_COL32(210, 130, 20, 255));
+            else if (!colorByCoordinates && (s.isAntennaSelected(index) || rowHovered))
                 ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, s.isAntennaSelected(index)
                     ? IM_COL32(190, 150, 25, 180) : IM_COL32(140, 85, 10, 180));
             ImGui::TableNextColumn();
@@ -127,6 +138,8 @@ void loadDatabase(ShowState& s) {
     s.nearby.clear();
     s.frequencies.clear();
     s.nearbyOnMap.clear();
+    s.nearbyCoordinateGroups.clear();
+    s.nearbyCoordinateCount = 0;
     s.nearestDirty = true;
     s.tuneStatus.clear();
     s.database.open(std::filesystem::u8path(s.databasePath));
@@ -289,12 +302,22 @@ void drawNearby(ShowState& s, App& app) {
             s.nearestDirty = true;
         }
     }
+    ImGui::BeginDisabled(s.nearestMode != 0);
+    if (checkboxEllipsis("Count antennas at the same coordinates as one", &s.countCoordinatesOnce))
+        s.nearestDirty = true;
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("K counts distinct coordinates. Every antenna matching the company filters\n"
+                          "at those coordinates stays in the table, with one background shade per location.\n"
+                          "This option does not apply to radius searches.");
     s.refreshNearby();
-    ImGui::Text("%zu antennas | %zu frequencies", s.nearby.size(), s.frequencies.size());
+    ImGui::Text("%zu antennas | %zu coordinates | %zu frequencies",
+                s.nearby.size(), s.nearbyCoordinateCount, s.frequencies.size());
     if (ImGui::BeginTabBar("nearby_views")) {
         if (ImGui::BeginTabItem("By antennas")) {
             if (s.nearby.empty()) ImGui::TextUnformatted("No antennas match this search.");
-            else drawAntennaRows(s, "nearest_antennas", s.nearby, true);
+            else drawAntennaRows(s, "nearest_antennas", s.nearby, true, 0,
+                                 s.nearestMode == 0 && s.countCoordinatesOnce);
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("By frequency")) {
@@ -305,6 +328,27 @@ void drawNearby(ShowState& s, App& app) {
         ImGui::EndTabBar();
     }
     ImGui::End();
+}
+
+void drawSettings(ShowState& s) {
+    bool enabled = s.backgroundMusic.enabled();
+    if (ImGui::Checkbox("BG music", &enabled)) {
+        std::filesystem::path musicPath;
+        if (enabled) {
+            constexpr const char* filename = "iknowyouregettingfasterbuticatchthemall.mp3";
+            for (const auto& path : {executableDirectory() / filename,
+                                     std::filesystem::path(filename),
+                                     std::filesystem::path(PHREAKSHOW_MUSIC_PATH)}) {
+                if (std::filesystem::exists(path)) {
+                    musicPath = path;
+                    break;
+                }
+            }
+        }
+        s.backgroundMusic.setEnabled(enabled, musicPath);
+    }
+    if (!s.backgroundMusic.error().empty() && ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", s.backgroundMusic.error().c_str());
 }
 } // namespace detail
 } // namespace phreakshow
@@ -336,18 +380,33 @@ void drawPhreakShow(App& app) {
         const auto* details = ImGui::FindWindowSettingsByID(ImHashStr("###PhreakShowDetails"));
         ImGui::DockBuilderDockWindow("Antennas at same coordinates###PhreakShowColocated", details && details->DockId ? details->DockId : dock);
     }
-    ImGui::DockSpace(dock, ImVec2(0, 0), visible ? 0 : ImGuiDockNodeFlags_KeepAliveOnly);
+    bool intercomVisible = false;
+    if (visible && ImGui::BeginTabBar("PhreakShowTabs")) {
+        if (ImGui::BeginTabItem("Intercom")) {
+            s.intercomActive = intercomVisible = true;
+            ImGui::DockSpace(dock, ImVec2(0, 0));
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("settings")) {
+            s.intercomActive = false;
+            drawSettings(s);
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+    if (!intercomVisible) ImGui::DockSpace(dock, ImVec2(0, 0), ImGuiDockNodeFlags_KeepAliveOnly);
     ImGui::End();
-    if (visible || isFloatingPanel("Map###PhreakShowMap")) {
+    if (s.intercomActive && (intercomVisible || isFloatingPanel("Map###PhreakShowMap"))) {
         if (ImGui::Begin("Map###PhreakShowMap")) drawMapCanvas(s);
         ImGui::End();
     }
-    if (visible || isFloatingPanel("Antenna details###PhreakShowDetails")) drawDetails(s);
-    if (visible || isFloatingPanel("Antennas at same coordinates###PhreakShowColocated")) drawColocated(s);
-    if (visible || isFloatingPanel("Nearby antennas / tuning###PhreakShowNearby")) drawNearby(s, app);
+    if (s.intercomActive && (intercomVisible || isFloatingPanel("Antenna details###PhreakShowDetails"))) drawDetails(s);
+    if (s.intercomActive && (intercomVisible || isFloatingPanel("Antennas at same coordinates###PhreakShowColocated"))) drawColocated(s);
+    if (s.intercomActive && (intercomVisible || isFloatingPanel("Nearby antennas / tuning###PhreakShowNearby"))) drawNearby(s, app);
 }
 
 void shutdownPhreakShow() {
+    phreakshow::detail::state().backgroundMusic.setEnabled(false);
     phreakshow::detail::state().tiles.shutdown();
     phreakshow::detail::state().database.close();
 }

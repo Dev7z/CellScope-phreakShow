@@ -4,6 +4,7 @@
 #include "gui/antenna_database.h"
 #include "gui/map_tiles.h"
 #include "gui/map_projection.h"
+#include "audio/background_music.h"
 #include <array>
 #include <map>
 #include <optional>
@@ -17,6 +18,8 @@ struct FrequencyGroup {
     std::vector<size_t> antennas;
 };
 struct ShowState {
+    bool intercomActive = true;
+    BackgroundMusic backgroundMusic;
     AntennaDatabase database;
     MapTiles tiles;
     bool databaseLocated = false;
@@ -43,12 +46,15 @@ struct ShowState {
     std::vector<size_t> pickCandidates;
     int nearestMode = 0; // 0 = k nearest; 1 = all within radius.
     int nearestCount = 50;
+    bool countCoordinatesOnce = false;
     double radiusKm = 2;
     bool nearestDirty = true;
     bool onlyNearbyOnMap = false;
     std::vector<NearbyAntenna> nearby;
     std::vector<FrequencyGroup> frequencies;
     std::vector<bool> nearbyOnMap;
+    std::vector<size_t> nearbyCoordinateGroups;
+    size_t nearbyCoordinateCount = 0;
     std::string tuneStatus;
 
     unsigned providerMask() const {
@@ -95,11 +101,16 @@ struct ShowState {
         if (!nearestDirty) return;
         nearby = userPositionSet ? database.nearest(userLongitude, userLatitude, nearbyProviderMask(),
             nearestMode == 0 ? nearestCount : 0,
-            nearestMode == 0 ? std::numeric_limits<double>::infinity() : radiusKm) : std::vector<NearbyAntenna>{};
+            nearestMode == 0 ? std::numeric_limits<double>::infinity() : radiusKm,
+            nearestMode == 0 && countCoordinatesOnce) : std::vector<NearbyAntenna>{};
         nearbyOnMap.assign(database.antennas().size(), false);
+        nearbyCoordinateGroups.assign(database.masts().size(), noAntenna);
+        nearbyCoordinateCount = 0;
         std::map<double, std::vector<size_t>> groups;
         for (const auto& row : nearby) {
             nearbyOnMap[row.antenna] = true;
+            auto& group = nearbyCoordinateGroups[database.antennas()[row.antenna].mast];
+            if (group == noAntenna) group = nearbyCoordinateCount++;
             groups[database.antennas()[row.antenna].frequencyMHz].push_back(row.antenna);
         }
         frequencies.clear();
@@ -152,5 +163,5 @@ bool checkboxEllipsis(const char* label, bool* value);
 // Shared antenna table used by co-located, nearby, and overlap-picking lists.
 void drawAntennaRows(ShowState& state, const char* id,
                     const std::vector<NearbyAntenna>& rows, bool showDistance,
-                    float height = 0);
+                    float height = 0, bool colorByCoordinates = false);
 } // namespace phreakshow::detail

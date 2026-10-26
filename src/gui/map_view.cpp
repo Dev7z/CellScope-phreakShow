@@ -44,6 +44,46 @@ struct Canvas {
     }
 };
 
+void drawSearchRadius(ImDrawList* draw, const Canvas& canvas, const ShowState& s) {
+    if (!s.userPositionSet || s.nearestMode != 1 || s.radiusKm <= 0 ||
+        s.radiusKm >= pi * earthRadiusKm) return; // Larger searches cover the whole globe.
+    const double pixelsPerKm = canvas.world / (2 * pi * earthRadiusKm *
+        std::cos(std::clamp(s.userLatitude, -maxLatitude, maxLatitude) * pi / 180));
+    const int steps = static_cast<int>(std::clamp(std::ceil(2 * pi * s.radiusKm * pixelsPerKm / 6),
+                                                 64.0, 4096.0));
+    std::vector<std::pair<ImVec2, ImVec2>> edges;
+    auto previous = coordinateAtDistance(s.userLongitude, s.userLatitude, 0, s.radiusKm);
+    double previousX = wrapX(0.5 + previous.first / 360);
+    double previousY = mercatorY(previous.second) * canvas.world;
+    for (int step = 1; step <= steps; ++step) {
+        const auto point = coordinateAtDistance(s.userLongitude, s.userLatitude,
+                                                step * 360.0 / steps, s.radiusKm);
+        double x = wrapX(0.5 + point.first / 360);
+        // Use the short segment across the antimeridian, then repeat it with
+        // the tiles. Never draw a chord spanning the entire world.
+        x += std::round(previousX - x);
+        const double y = mercatorY(point.second) * canvas.world;
+        if (std::max(previousY, y) >= canvas.top && std::min(previousY, y) <= canvas.top + canvas.size.y &&
+            !(std::min(previous.second, point.second) > maxLatitude ||
+              std::max(previous.second, point.second) < -maxLatitude)) {
+            const double first = std::ceil((canvas.left - std::max(previousX, x) * canvas.world) / canvas.world);
+            const double last = std::floor((canvas.left + canvas.size.x - std::min(previousX, x) * canvas.world) / canvas.world);
+            for (double copy = first; copy <= last; ++copy) {
+                edges.push_back({
+                    ImVec2(canvas.origin.x + static_cast<float>((previousX + copy) * canvas.world - canvas.left),
+                           canvas.origin.y + static_cast<float>(previousY - canvas.top)),
+                    ImVec2(canvas.origin.x + static_cast<float>((x + copy) * canvas.world - canvas.left),
+                           canvas.origin.y + static_cast<float>(y - canvas.top))});
+            }
+        }
+        previous = point;
+        previousX = x;
+        previousY = y;
+    }
+    for (const auto& edge : edges) draw->AddLine(edge.first, edge.second, IM_COL32(15, 25, 30, 220), 4);
+    for (const auto& edge : edges) draw->AddLine(edge.first, edge.second, IM_COL32(30, 230, 255, 230), 2);
+}
+
 void drawSector(ImDrawList* draw, const Antenna& antenna, ImVec2 center, float length, ImU32 highlight = 0) {
     const bool emphasized = highlight != 0;
     const ImU32 color = emphasized ? highlight : providerColor(antenna.provider);
@@ -269,6 +309,7 @@ void drawMapCanvas(ShowState& s) {
         }
     }
 
+    drawSearchRadius(draw, canvas, s);
     const double margin = s.zoom >= 14 ? s.sectorLength + 10 : 10;
     const double westX = (canvas.left - margin) / world, eastX = (canvas.left + size.x + margin) / world;
     const bool wholeWorld = eastX - westX >= 1;
@@ -354,7 +395,11 @@ void drawMapCanvas(ShowState& s) {
         draw->AddCircleFilled(center, 5, cyan);
         draw->AddCircle(center, 9, IM_COL32(15, 20, 25, 255), 0, 5);
         draw->AddCircle(center, 9, cyan, 0, 2);
-        draw->AddText(ImVec2(center.x + 12, center.y - ImGui::GetFontSize() / 2), cyan, "You");
+        char label[96] = "You";
+        if (s.nearestMode == 1)
+            std::snprintf(label, sizeof(label), "You | Radius: %.3f km%s", s.radiusKm,
+                          s.radiusKm >= pi * earthRadiusKm ? " (whole world)" : "");
+        draw->AddText(ImVec2(center.x + 12, center.y - ImGui::GetFontSize() / 2), cyan, label);
     });
     const ImVec2 crosshair(origin.x + size.x / 2, origin.y + size.y / 2);
     const float arm = std::max(8.0f, ImGui::GetFontSize() * 0.7f);

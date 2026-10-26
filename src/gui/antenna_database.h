@@ -58,9 +58,12 @@ public:
     std::vector<size_t> visibleMasts(double west, double east, double south,
                                    double north, unsigned providers) const;
     // k=0 returns all matches within radiusKm, including co-located records.
+    // With countCoordinatesOnce, k counts distinct coordinates and every
+    // matching antenna at each of the k nearest coordinates is returned.
     std::vector<NearbyAntenna> nearest(double longitude, double latitude,
                                      unsigned providers, size_t k,
-                                     double radiusKm = std::numeric_limits<double>::infinity()) const;
+                                     double radiusKm = std::numeric_limits<double>::infinity(),
+                                     bool countCoordinatesOnce = false) const;
     std::vector<std::pair<std::string, std::string>> details(size_t antenna);
 private:
     sqlite3* db_ = nullptr;

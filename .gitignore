@@ -8,6 +8,7 @@
 /cmake_install.cmake
 /CellScope-phreakShow
 /libimgui.a
+/libminiaudio.a
 /third_party/lte/CMakeFiles/
 /third_party/lte/Makefile
 /third_party/lte/cmake_install.cmake

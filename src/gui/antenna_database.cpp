@@ -20,7 +20,7 @@ double distanceKm(double lon1, double lat1, double lon2, double lat2) {
     const double dlat = (lat2 - lat1) * pi / 180, dlon = (lon2 - lon1) * pi / 180;
     const double h = std::pow(std::sin(dlat / 2), 2) +
                      std::cos(a) * std::cos(b) * std::pow(std::sin(dlon / 2), 2);
-    return 6371.0088 * 2 * std::asin(std::sqrt(std::clamp(h, 0.0, 1.0)));
+    return earthRadiusKm * 2 * std::asin(std::sqrt(std::clamp(h, 0.0, 1.0)));
 }
 
 std::pair<double, double> antennaDirection(double azimuth, double length) {
@@ -116,15 +116,21 @@ std::vector<size_t> AntennaDatabase::visibleMasts(double west, double east, doub
 }
 
 std::vector<NearbyAntenna> AntennaDatabase::nearest(double longitude, double latitude,
-                                                  unsigned providers, size_t k, double radiusKm) const {
+                                                  unsigned providers, size_t k, double radiusKm,
+                                                  bool countCoordinatesOnce) const {
     std::vector<NearbyAntenna> rows;
     if (!validMapCoordinates(longitude, latitude) || std::isnan(radiusKm) || radiusKm < 0) return rows;
+    const bool grouped = countCoordinatesOnce && k != 0;
     for (const auto& mast : masts_) {
         if (!(mast.providers & providers)) continue;
         const double distance = distanceKm(longitude, latitude, mast.longitude, mast.latitude);
         if (distance > radiusKm) continue;
-        for (size_t index : mast.antennas)
-            if (providerBit(antennas_[index].provider) & providers) rows.push_back({index, distance});
+        for (size_t index : mast.antennas) {
+            if (!(providerBit(antennas_[index].provider) & providers)) continue;
+            rows.push_back({index, distance});
+            // The first matching PK represents this coordinate for ranking.
+            if (grouped) break;
+        }
     }
     auto less = [&](const auto& a, const auto& b) {
         if (a.distanceKm != b.distanceKm) return a.distanceKm < b.distanceKm;
@@ -134,6 +140,14 @@ std::vector<NearbyAntenna> AntennaDatabase::nearest(double longitude, double lat
         std::partial_sort(rows.begin(), rows.begin() + k, rows.end(), less);
         rows.resize(k);
     } else std::sort(rows.begin(), rows.end(), less);
+    if (grouped) {
+        std::vector<NearbyAntenna> expanded;
+        for (const auto& row : rows)
+            for (size_t index : masts_[antennas_[row.antenna].mast].antennas)
+                if (providerBit(antennas_[index].provider) & providers)
+                    expanded.push_back({index, row.distanceKm});
+        return expanded;
+    }
     return rows;
 }
 
