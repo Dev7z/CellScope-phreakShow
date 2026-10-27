@@ -27,3 +27,8 @@ __pycache__/
 /assets/map_cache/
 
 /switzerland.db
+
+/DartConfiguration.tcl
+/CTestTestfile.cmake
+/*_selftest
+/cmake-build-*/
