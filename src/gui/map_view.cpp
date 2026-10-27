@@ -456,6 +456,24 @@ void drawMapContent(ShowState& s) {
 }
 
 namespace {
+float mapFilterHeight(float width) {
+    const auto& style = ImGui::GetStyle();
+    const float height = ImGui::GetFrameHeight();
+    float rowWidth = 0;
+    int rows = 1;
+    for (const char* label : {"Sunrise", "Swisscom", "Salt", "Include indoor"}) {
+        const float itemWidth = height + style.ItemInnerSpacing.x + ImGui::CalcTextSize(label).x;
+        const float spacing = rowWidth > 0 ? style.ItemSpacing.x : 0;
+        if (rowWidth > 0 && rowWidth + spacing + itemWidth > width) {
+            ++rows;
+            rowWidth = itemWidth;
+        } else {
+            rowWidth += spacing + itemWidth;
+        }
+    }
+    return rows * height + (rows - 1) * style.ItemSpacing.y;
+}
+
 void verticalSplitter(const char* id, float& topHeight, float availableHeight, float minimumTop, float minimumBottom) {
     const float thickness = std::max(5.0f, ImGui::GetStyle().ItemSpacing.y);
     ImGui::InvisibleButton(id, ImVec2(std::max(1.0f, ImGui::GetContentRegionAvail().x), thickness));
@@ -470,24 +488,28 @@ void verticalSplitter(const char* id, float& topHeight, float availableHeight, f
 }
 
 void drawMapCanvas(ShowState& s) {
+    const auto& style = ImGui::GetStyle();
     const float line = ImGui::GetFrameHeightWithSpacing();
     const float available = ImGui::GetContentRegionAvail().y;
-    const float minimumSettings = line * 3;
+    const float filterHeight = mapFilterHeight(std::max(1.0f, ImGui::GetContentRegionAvail().x - 2 * style.WindowPadding.x));
+    const float minimumSettings = line + filterHeight + style.ItemSpacing.y;
     const float minimumMap = line * 7; // reserve the canvas, footer, padding and divider
     if (s.mapSettingsHeight <= 0) s.mapSettingsHeight = line * 9;
     const float settingsHeight = std::clamp(s.mapSettingsHeight, std::min(minimumSettings, available * .4f),
         std::max(minimumSettings, available - minimumMap));
     s.mapSettingsHeight = settingsHeight;
-    if (ImGui::BeginChild("map_settings", ImVec2(0, settingsHeight), ImGuiChildFlags_AlwaysUseWindowPadding)) {
+    // Filters use only their actual checkbox rows; all remaining settings height
+    // belongs to the scrollable controls above them, with no blank footer.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(style.WindowPadding.x, 0));
+    const bool settingsVisible = ImGui::BeginChild("map_settings", ImVec2(0, settingsHeight), ImGuiChildFlags_AlwaysUseWindowPadding);
+    ImGui::PopStyleVar();
+    if (settingsVisible) {
         const float controlsAvailable = ImGui::GetContentRegionAvail().y;
-        if (s.mapControlsHeight <= 0) s.mapControlsHeight = line * 6.5f;
-        const float controlsHeight = std::clamp(s.mapControlsHeight, line,
-            std::max(line, controlsAvailable - line * 2.3f));
-        s.mapControlsHeight = controlsHeight;
+        const float controlsHeight = std::max(line, controlsAvailable - filterHeight - style.ItemSpacing.y);
         if (ImGui::BeginChild("map_controls_top", ImVec2(0, controlsHeight))) toolbar(s);
         ImGui::EndChild();
-        verticalSplitter("settings_splitter", s.mapControlsHeight, controlsAvailable, line, line * 2.3f);
-        if (ImGui::BeginChild("map_filters", ImVec2(0, 0))) {
+        if (ImGui::BeginChild("map_filters", ImVec2(0, filterHeight), ImGuiChildFlags_None,
+                             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
             const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
             for (auto p : {MapProvider::Sunrise, MapProvider::Swisscom, MapProvider::Salt}) {
                 if (p != MapProvider::Sunrise) nextToPrevious(right, providerName(p), true);

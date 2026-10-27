@@ -1,5 +1,6 @@
 #include "gui/phreakshow.h"
 #include "gui/phreakshow_state.h"
+#include "gui/workspace_panel.h"
 #include "core/main_funcs.h"
 #include "imgui_internal.h"
 #include <algorithm>
@@ -167,7 +168,7 @@ void locateDatabase(ShowState& s) {
 }
 
 void drawDetails(ShowState& s) {
-    if (!ImGui::Begin("Antenna details###PhreakShowDetails")) { ImGui::End(); return; }
+    if (!beginWorkspacePanel("Antenna details###PhreakShowDetails")) { ImGui::End(); return; }
     if (s.selected == noAntenna) {
         ImGui::TextWrapped("Click a mast, antenna direction line, or a row in Nearby antennas.");
         ImGui::End();
@@ -208,7 +209,7 @@ void drawDetails(ShowState& s) {
 }
 
 void drawColocated(ShowState& s) {
-    if (!ImGui::Begin("Antennas at same coordinates###PhreakShowColocated")) { ImGui::End(); return; }
+    if (!beginWorkspacePanel("Antennas at same coordinates###PhreakShowColocated")) { ImGui::End(); return; }
     if (s.selected == noAntenna) {
         ImGui::TextWrapped("Select an antenna to see the other antennas at its coordinates.");
     } else {
@@ -263,7 +264,7 @@ void drawFrequencyRows(ShowState& s) {
 }
 
 void drawNearby(ShowState& s, App& app) {
-    if (!ImGui::Begin("Nearby antennas / tuning###PhreakShowNearby")) { ImGui::End(); return; }
+    if (!beginWorkspacePanel("Nearby antennas / tuning###PhreakShowNearby")) { ImGui::End(); return; }
     ImGui::TextAligned(0, -FLT_MIN, "CellScope center: %.4f MHz", app.centerFreqMHz);
     const auto* antenna = s.selected == noAntenna ? nullptr : &s.database.antennas()[s.selected];
     if (s.selectedFrequency) ImGui::TextAligned(0, -FLT_MIN, "Selected frequency: %.4f MHz", *s.selectedFrequency);
@@ -396,25 +397,28 @@ void drawPhreakShow(App& app) {
     }
     bool intercomVisible = false;
     if (visible && ImGui::BeginTabBar("PhreakShowTabs")) {
-        const ImRect tabBarBounds = GImGui->CurrentTabBar->BarRect;
         if (ImGui::BeginTabItem("Intercom")) {
-            s.intercomActive = intercomVisible = true;
-            ImGui::DockSpace(dock, ImVec2(0, 0));
+            s.intercomActive = true;
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(2, 2));
+            intercomVisible = ImGui::BeginChild("IntercomContainer", ImVec2(0, 0), ImGuiChildFlags_Borders,
+                ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+            ImGui::PopStyleVar();
+            if (intercomVisible) ImGui::DockSpace(dock, ImVec2(0, 0));
+            ImGui::EndChild();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("settings")) {
             s.intercomActive = false;
-            drawSettings(s);
+            if (ImGui::BeginChild("SettingsContainer", ImVec2(0, 0), ImGuiChildFlags_Borders)) drawSettings(s);
+            ImGui::EndChild();
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
-        ImGui::GetWindowDrawList()->AddRect(tabBarBounds.Min, tabBarBounds.Max,
-                                           ImGui::GetColorU32(ImGuiCol_Border));
     }
     if (!intercomVisible) ImGui::DockSpace(dock, ImVec2(0, 0), ImGuiDockNodeFlags_KeepAliveOnly);
     ImGui::End();
     if (s.intercomActive && (intercomVisible || isFloatingPanel("Map###PhreakShowMap"))) {
-        if (ImGui::Begin("Map###PhreakShowMap")) drawMapCanvas(s);
+        if (beginWorkspacePanel("Map###PhreakShowMap")) drawMapCanvas(s);
         ImGui::End();
     }
     if (s.intercomActive && (intercomVisible || isFloatingPanel("Antenna details###PhreakShowDetails"))) drawDetails(s);

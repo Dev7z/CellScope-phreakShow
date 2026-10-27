@@ -12,6 +12,7 @@
 #include "version.h"
 #include "gui/waterfall.h"
 #include "gui/phreakshow.h"
+#include "gui/workspace_panel.h"
 #include <algorithm>
 #include <cfloat>
 #include <chrono>
@@ -97,7 +98,7 @@ static void centerFrequencyInput(App& app, const char* label)
 
 void drawControls(App& app)
 {
-    ImGui::Begin((std::string(_L("Control")) + "###Control").c_str());
+    beginWorkspacePanel((std::string(_L("Control")) + "###Control").c_str());
 
     bool running = app.active->running();
     bool starting = app.starting.load();
@@ -812,7 +813,7 @@ void drawControls(App& app)
 void drawSpectrum(App& app, SpectrumView& v, DecoderManager& mgr, const char* title,
                          bool allowBandBrowse, bool voiceView)
 {
-    ImGui::Begin(title);
+    beginWorkspacePanel(title);
     ImVec2 origin = ImGui::GetCursorScreenPos();
     float availW = ImGui::GetContentRegionAvail().x;
     std::string plotId = std::string("##plot_") + title;
@@ -994,7 +995,7 @@ void drawSpectrum(App& app, SpectrumView& v, DecoderManager& mgr, const char* ti
 void drawWaterfall(App& app, SpectrumView& v, const char* title)
 {
     (void)app;
-    ImGui::Begin(title);
+    beginWorkspacePanel(title);
 
     float uMin = 0.0f, uMax = 1.0f;
     float xLo = 0.0f, xHi = 1.0f;
@@ -1063,7 +1064,7 @@ void drawWaterfall(App& app, SpectrumView& v, const char* title)
 
 void drawDecoders(App& app)
 {
-    ImGui::Begin((std::string(_L("Decoders")) + "###Decoders").c_str());
+    beginWorkspacePanel((std::string(_L("Decoders")) + "###Decoders").c_str());
 
     auto decs = app.decoders.status();
     if (app.dualMode)
@@ -1166,7 +1167,7 @@ void drawDecoders(App& app)
 
 void drawSUs(App& app)
 {
-    ImGui::Begin((std::string(_L("Placeholder")) + "###Placeholder").c_str());
+    beginWorkspacePanel((std::string(_L("Placeholder")) + "###Placeholder").c_str());
 
     unsigned long long suTotal = app.decoders.suLog().count();
     if (app.dualMode) suTotal += app.decodersB.suLog().count();
@@ -1254,7 +1255,7 @@ static ImPlotPoint constGetter(int idx, void* data)
 
 void drawConstellation(App& app)
 {
-    ImGui::Begin((std::string(_L("Constellation")) + "###Constellation").c_str());
+    beginWorkspacePanel((std::string(_L("Constellation")) + "###Constellation").c_str());
 
     auto decs = app.decoders.status();
     if (app.dualMode)
@@ -1427,7 +1428,7 @@ void drawLte(App& app)
     if (!app.showLte)
         return;
 
-    ImGui::Begin((std::string(_L("LTE")) + "###LTE").c_str());
+    beginWorkspacePanel((std::string(_L("LTE")) + "###LTE").c_str());
 
     namespace lte = cellscope::lte;
 
@@ -1548,7 +1549,7 @@ void drawLteUes(App& app)
     if (!app.showLte)
         return;
 
-    ImGui::Begin((std::string(_L("UEs")) + "###UEs").c_str());
+    beginWorkspacePanel((std::string(_L("UEs")) + "###UEs").c_str());
 
     namespace lte = cellscope::lte;
 
@@ -1632,6 +1633,7 @@ void drawLteUes(App& app)
 
     if (ImGui::BeginTable("lte_ues", 7,
                           ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
+                          ImGuiTableFlags_Resizable |
                           ImGuiTableFlags_Sortable | ImGuiTableFlags_SortTristate))
     {
         ImGui::TableSetupScrollFreeze(0, 1);
@@ -1738,7 +1740,7 @@ void drawLteTraffic(App& app)
     if (!app.showLte)
         return;
 
-    ImGui::Begin((std::string(_L("Traffic")) + "###Traffic").c_str());
+    beginWorkspacePanel((std::string(_L("Traffic")) + "###Traffic").c_str());
 
     namespace lte = cellscope::lte;
 
@@ -1800,7 +1802,7 @@ void drawLteCalls(App& app)
     if (!app.showLte)
         return;
 
-    ImGui::Begin((std::string(_L("Calls")) + "###Calls").c_str());
+    beginWorkspacePanel((std::string(_L("Calls")) + "###Calls").c_str());
 
     namespace lte = cellscope::lte;
 
@@ -1815,7 +1817,7 @@ void drawLteCalls(App& app)
     ImGui::TextDisabled("Heuristic: VoLTE ~20 ms grant cadence, small TBs, sustained.");
 
     if (ImGui::BeginTable("lte_active_calls", 4,
-                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg, ImVec2(0, 130)))
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable, ImVec2(0, 130)))
     {
         ImGui::TableSetupColumn("RNTI", ImGuiTableColumnFlags_WidthFixed, 70);
         ImGui::TableSetupColumn("Duration", ImGuiTableColumnFlags_WidthFixed, 80);

@@ -31,7 +31,6 @@ struct ShowState {
     bool includeIndoor = true;
     bool nearbyIncludeIndoor = true;
     float mapSettingsHeight = 0;
-    float mapControlsHeight = 0;
     double mapX = 0.5 + 8.13 / 360.0;
     double mapY = mercatorY(46.8);
     int zoom = 8;
