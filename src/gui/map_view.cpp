@@ -455,76 +455,19 @@ void drawMapContent(ShowState& s) {
     }
 }
 
-namespace {
-float mapFilterHeight(float width) {
-    const auto& style = ImGui::GetStyle();
-    const float height = ImGui::GetFrameHeight();
-    float rowWidth = 0;
-    int rows = 1;
-    for (const char* label : {"Sunrise", "Swisscom", "Salt", "Include indoor"}) {
-        const float itemWidth = height + style.ItemInnerSpacing.x + ImGui::CalcTextSize(label).x;
-        const float spacing = rowWidth > 0 ? style.ItemSpacing.x : 0;
-        if (rowWidth > 0 && rowWidth + spacing + itemWidth > width) {
-            ++rows;
-            rowWidth = itemWidth;
-        } else {
-            rowWidth += spacing + itemWidth;
-        }
+void drawMapControls(ShowState& s) {
+    toolbar(s);
+    ImGui::SeparatorText("Visible antennas");
+    const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+    for (auto p : {MapProvider::Sunrise, MapProvider::Swisscom, MapProvider::Salt}) {
+        if (p != MapProvider::Sunrise) nextToPrevious(right, providerName(p), true);
+        ImGui::PushStyleColor(ImGuiCol_Text, providerColor(p));
+        checkboxEllipsis(providerName(p), &s.providers[static_cast<size_t>(p)]);
+        ImGui::PopStyleColor();
     }
-    return rows * height + (rows - 1) * style.ItemSpacing.y;
+    nextToPrevious(right, "Include indoor", true);
+    checkboxEllipsis("Include indoor", &s.includeIndoor);
 }
 
-void verticalSplitter(const char* id, float& topHeight, float availableHeight, float minimumTop, float minimumBottom) {
-    const float thickness = std::max(5.0f, ImGui::GetStyle().ItemSpacing.y);
-    ImGui::InvisibleButton(id, ImVec2(std::max(1.0f, ImGui::GetContentRegionAvail().x), thickness));
-    const bool active = ImGui::IsItemActive();
-    if (active || ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
-    if (active) topHeight = std::clamp(topHeight + ImGui::GetIO().MouseDelta.y,
-        minimumTop, std::max(minimumTop, availableHeight - minimumBottom));
-    ImGui::GetWindowDrawList()->AddRectFilled(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
-        ImGui::GetColorU32(active ? ImGuiCol_SeparatorActive : ImGui::IsItemHovered()
-            ? ImGuiCol_SeparatorHovered : ImGuiCol_Separator));
-}
-}
-
-void drawMapCanvas(ShowState& s) {
-    const auto& style = ImGui::GetStyle();
-    const float line = ImGui::GetFrameHeightWithSpacing();
-    const float available = ImGui::GetContentRegionAvail().y;
-    const float filterHeight = mapFilterHeight(std::max(1.0f, ImGui::GetContentRegionAvail().x - 2 * style.WindowPadding.x));
-    const float minimumSettings = line + filterHeight + style.ItemSpacing.y;
-    const float minimumMap = line * 7; // reserve the canvas, footer, padding and divider
-    if (s.mapSettingsHeight <= 0) s.mapSettingsHeight = line * 9;
-    const float settingsHeight = std::clamp(s.mapSettingsHeight, std::min(minimumSettings, available * .4f),
-        std::max(minimumSettings, available - minimumMap));
-    s.mapSettingsHeight = settingsHeight;
-    // Filters use only their actual checkbox rows; all remaining settings height
-    // belongs to the scrollable controls above them, with no blank footer.
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(style.WindowPadding.x, 0));
-    const bool settingsVisible = ImGui::BeginChild("map_settings", ImVec2(0, settingsHeight), ImGuiChildFlags_AlwaysUseWindowPadding);
-    ImGui::PopStyleVar();
-    if (settingsVisible) {
-        const float controlsAvailable = ImGui::GetContentRegionAvail().y;
-        const float controlsHeight = std::max(line, controlsAvailable - filterHeight - style.ItemSpacing.y);
-        if (ImGui::BeginChild("map_controls_top", ImVec2(0, controlsHeight))) toolbar(s);
-        ImGui::EndChild();
-        if (ImGui::BeginChild("map_filters", ImVec2(0, filterHeight), ImGuiChildFlags_None,
-                             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
-            const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
-            for (auto p : {MapProvider::Sunrise, MapProvider::Swisscom, MapProvider::Salt}) {
-                if (p != MapProvider::Sunrise) nextToPrevious(right, providerName(p), true);
-                ImGui::PushStyleColor(ImGuiCol_Text, providerColor(p));
-                checkboxEllipsis(providerName(p), &s.providers[static_cast<size_t>(p)]);
-                ImGui::PopStyleColor();
-            }
-            nextToPrevious(right, "Include indoor", true);
-            checkboxEllipsis("Include indoor", &s.includeIndoor);
-        }
-        ImGui::EndChild();
-    }
-    ImGui::EndChild();
-    verticalSplitter("map_settings_splitter", s.mapSettingsHeight, available, minimumSettings, minimumMap);
-    if (ImGui::BeginChild("map_view", ImVec2(0, 0), ImGuiChildFlags_AlwaysUseWindowPadding)) drawMapContent(s);
-    ImGui::EndChild();
-}
+void drawMapCanvas(ShowState& s) { drawMapContent(s); }
 } // namespace phreakshow::detail
