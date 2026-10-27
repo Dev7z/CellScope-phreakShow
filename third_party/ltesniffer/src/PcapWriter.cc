@@ -70,23 +70,44 @@ void PcapWriter::pcap_write_crnti(uint8_t* pdu,
 //New class:
 void LTESniffer_pcap_writer::enable(bool en)
 {
-  enable_write = true; 
+  std::lock_guard<std::mutex> lock(pcap_mutex);
+  enable_write = en;
 }
 void LTESniffer_pcap_writer::open(const std::string filename, const std::string api_filename, uint32_t ue_id)
 {
+  close();
+  std::lock_guard<std::mutex> lock(pcap_mutex);
+  counts = {};
   pcap_file       = DLT_PCAP_Open(MAC_LTE_DLT, filename.c_str());
   pcap_file_api   = DLT_PCAP_Open(MAC_LTE_DLT, api_filename.c_str());
   this->ue_id     = ue_id;
   enable_write    = true;
+  counts.io_error = !pcap_file || !pcap_file_api;
+  // Make even an empty capture's header visible before decoding any packets.
+  if (pcap_file && fflush(pcap_file) != 0) counts.io_error = true;
+  if (pcap_file_api && fflush(pcap_file_api) != 0) counts.io_error = true;
+}
+
+LTESniffer_pcap_writer::Counts LTESniffer_pcap_writer::flush()
+{
+  std::lock_guard<std::mutex> lock(pcap_mutex);
+  if (pcap_file && fflush(pcap_file) != 0) counts.io_error = true;
+  if (pcap_file_api && fflush(pcap_file_api) != 0) counts.io_error = true;
+  return counts;
 }
 
 void LTESniffer_pcap_writer::close()
 {
-  fprintf(stdout, "Saving MAC PCAP file\n");
+  std::lock_guard<std::mutex> lock(pcap_mutex);
+  enable_write = false;
   DLT_PCAP_Close(pcap_file);
+  DLT_PCAP_Close(pcap_file_api);
+  pcap_file = nullptr;
+  pcap_file_api = nullptr;
 }
 
 void LTESniffer_pcap_writer::set_ue_id(uint16_t ue_id) {
+  std::lock_guard<std::mutex> lock(pcap_mutex);
   this->ue_id = ue_id;
 }
 
@@ -95,8 +116,8 @@ void LTESniffer_pcap_writer::pack_and_write(uint8_t* pdu, uint32_t pdu_len_bytes
 {
 
   std::unique_lock<std::mutex> lock(pcap_mutex);
-  if (enable_write) {
-    MAC_Context_Info_t        context;
+  if (enable_write && pcap_file) {
+    MAC_Context_Info_t        context = {};
     context.direction       = direction;
     context.rntiType        = rnti_type;
     context.sysFrameNumber  = (uint16_t)(tti/10);
@@ -111,7 +132,11 @@ void LTESniffer_pcap_writer::pack_and_write(uint8_t* pdu, uint32_t pdu_len_bytes
     context.cc_idx          = 0;
 
     if (pdu) {
-      LTE_PCAP_MAC_WritePDU(pcap_file, &context, pdu, pdu_len_bytes);
+      if (LTE_PCAP_MAC_WritePDU(pcap_file, &context, pdu, pdu_len_bytes) == 1 && !ferror(pcap_file)) {
+        ++counts.dl_packets;
+      } else {
+        counts.io_error = true;
+      }
     }
   }
   lock.unlock();
@@ -122,8 +147,8 @@ void LTESniffer_pcap_writer::pack_and_write_api(uint8_t* pdu, uint32_t pdu_len_b
 {
 
   std::unique_lock<std::mutex> lock(pcap_mutex);
-  if (enable_write) {
-    MAC_Context_Info_t        context;
+  if (enable_write && pcap_file_api) {
+    MAC_Context_Info_t        context = {};
     context.direction       = direction;
     context.rntiType        = rnti_type;
     context.sysFrameNumber  = (uint16_t)(tti/10);
@@ -138,7 +163,11 @@ void LTESniffer_pcap_writer::pack_and_write_api(uint8_t* pdu, uint32_t pdu_len_b
     context.cc_idx          = 0;
 
     if (pdu) {
-      LTE_PCAP_MAC_WritePDU(pcap_file_api, &context, pdu, pdu_len_bytes);
+      if (LTE_PCAP_MAC_WritePDU(pcap_file_api, &context, pdu, pdu_len_bytes) == 1 && !ferror(pcap_file_api)) {
+        ++counts.api_packets;
+      } else {
+        counts.io_error = true;
+      }
     }
   }
   lock.unlock();

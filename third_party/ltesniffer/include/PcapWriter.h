@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include <cstdint>
 #include "srsran/common/mac_pcap.h"
 #include "srsran/common/pcap.h"
 using namespace srsran;
@@ -29,9 +30,17 @@ private:
 class LTESniffer_pcap_writer
 {
 public:
-    LTESniffer_pcap_writer() {enable_write=false; ue_id=0; pcap_file = NULL; };
+    struct Counts {
+        uint64_t dl_packets = 0;
+        uint64_t api_packets = 0;
+        bool io_error = false;
+    };
+
+    LTESniffer_pcap_writer() = default;
+    ~LTESniffer_pcap_writer() { close(); }
     void enable(bool en);
     void open(const std::string filename, const std::string api_filename, uint32_t ue_id = 0);
+    Counts flush();
     void close();
 
     void set_ue_id(uint16_t ue_id);
@@ -51,10 +60,11 @@ public:
     void write_dl_paging_api(uint8_t* pdu, uint32_t pdu_len_bytes, uint16_t rnti, bool crc_ok, uint32_t tti, bool retx);
 private:
     std::mutex pcap_mutex;
-    bool enable_write; 
-    FILE *pcap_file;
-    FILE *pcap_file_api;
-    uint32_t ue_id;
+    bool enable_write = false;
+    FILE *pcap_file = nullptr;
+    FILE *pcap_file_api = nullptr;
+    uint32_t ue_id = 0;
+    Counts counts;
     void pack_and_write(uint8_t* pdu, uint32_t pdu_len_bytes, uint32_t reTX, bool crc_ok, uint32_t tti,
                                 uint16_t crnti_, uint8_t direction, uint8_t rnti_type);
     

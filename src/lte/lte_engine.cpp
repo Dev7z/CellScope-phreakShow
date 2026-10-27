@@ -599,8 +599,8 @@ struct LteEngine::Impl {
     }
 
     bool search_cell(CellInfo& out);
-    bool decode_mib(CellInfo& io);
-    void run_decode(CellInfo& ci);
+    bool decode_mib(CellInfo& io, srsran_cell_t& decoded_cell);
+    void run_decode(const srsran_cell_t& decoded_cell);
     void run_worker();
 
     struct Consumer; // SubframeInfoConsumer that feeds on_dl_dci()
@@ -633,7 +633,7 @@ bool LteEngine::Impl::search_cell(CellInfo& out)
 }
 
 // ---- MIB decode (bandwidth, ports, SFN) ----
-bool LteEngine::Impl::decode_mib(CellInfo& io)
+bool LteEngine::Impl::decode_mib(CellInfo& io, srsran_cell_t& decoded_cell)
 {
     srsran_cell_t cell = {};
     cell.id            = (uint32_t)io.pci;
@@ -663,6 +663,8 @@ bool LteEngine::Impl::decode_mib(CellInfo& io)
         io.nof_prb   = (int)cell.nof_prb;
         io.nof_ports = (int)nof_ports;
         io.sfn       = (int)sfn;
+        cell.nof_ports = nof_ports;
+        decoded_cell = cell;
         ok           = true;
     }
     srsran_ue_mib_sync_free(&mib);
@@ -675,6 +677,7 @@ void LteEngine::Impl::run_worker()
     // Keep the informative status set by start() (input rate / decimation).
 
     CellInfo info;
+    srsran_cell_t decoded_cell = {};
     int attempts = 0;
     while (run.load()) {
         if (!search_cell(info)) {
@@ -683,7 +686,7 @@ void LteEngine::Impl::run_worker()
         }
         set_status("Cell PCI " + std::to_string(info.pci) + " found, decoding MIB...");
 
-        if (decode_mib(info)) {
+        if (decode_mib(info, decoded_cell)) {
             {
                 std::lock_guard<std::mutex> lk(cell_mtx);
                 cell_info = info;
@@ -702,7 +705,7 @@ void LteEngine::Impl::run_worker()
     // Cell known: switch the input pipeline to the cell's sample rate and run
     // the PDCCH blind-search + PDSCH decode loop (FALCON + LTESniffer core).
     if (run.load() && st.load() == EngineState::CellFound) {
-        run_decode(info);
+        run_decode(decoded_cell);
     }
 }
 
@@ -710,12 +713,14 @@ void LteEngine::Impl::run_worker()
 // subframe and feeds the engine's UE table + traffic log.
 struct LteEngine::Impl::Consumer : public SubframeInfoConsumer {
     Impl* impl = nullptr;
+    std::atomic<uint64_t> dl_grants{0};
     void consumeDCICollection(const SubframeInfo& si) override
     {
         try {
             auto&    dc    = const_cast<SubframeInfo&>(si).getDCICollection();
             uint32_t sfn   = dc.get_sfn();
             uint32_t sfidx = dc.get_sf_idx();
+            dl_grants.fetch_add(dc.getDLSnifferDCI_DL().size());
             for (auto& dci : dc.getDLSnifferDCI_DL()) {
                 // Pick the grant matching the UE's MCS table (64QAM vs 256QAM);
                 // fall back to whichever grant actually carries a TB. Without
@@ -845,15 +850,11 @@ static void setup_rnti_manager(RNTIManager& rm)
 }
 
 // ---- full PDCCH/PDSCH decode loop (downlink) ----
-void LteEngine::Impl::run_decode(CellInfo& ci)
+void LteEngine::Impl::run_decode(const srsran_cell_t& decoded_cell)
 {
-    srsran_cell_t cell   = {};
-    cell.id              = (uint32_t)ci.pci;
-    cell.nof_prb         = (uint32_t)ci.nof_prb;
-    cell.nof_ports       = ci.nof_ports > 0 ? (uint32_t)ci.nof_ports : 1;
-    cell.cp              = SRSRAN_CP_NORM;
-    cell.phich_length    = SRSRAN_PHICH_NORM;
-    cell.phich_resources = SRSRAN_PHICH_R_1_6;
+    // PHICH settings affect the PDCCH resource map. Preserve the entire MIB
+    // configuration instead of silently substituting PHICH Ng = 1/6.
+    srsran_cell_t cell = decoded_cell;
 
     const int srate = srsran_sampling_freq_hz(cell.nof_prb);
     if (srate <= 0) {
@@ -933,7 +934,9 @@ void LteEngine::Impl::run_decode(CellInfo& ci)
                std::to_string(cell.nof_prb) + " PRB, " +
                std::to_string((int)(srate / 1e6)) + " Msps)");
     diagLog("run_decode enter: PCI=" + std::to_string(cell.id) + " prb=" + std::to_string(cell.nof_prb) +
-            " ports=" + std::to_string(cell.nof_ports) + " srate=" + std::to_string(srate));
+            " ports=" + std::to_string(cell.nof_ports) + " srate=" + std::to_string(srate) +
+            " phich_length=" + std::to_string(cell.phich_length) +
+            " phich_resources=" + std::to_string(cell.phich_resources));
 
     const uint32_t max_num_samples = 3 * SRSRAN_SF_LEN_PRB(cell.nof_prb);
     uint32_t       sfn             = 0;
@@ -1007,10 +1010,19 @@ void LteEngine::Impl::run_decode(CellInfo& ci)
                 std::lock_guard<std::mutex> lk(ue_mtx);
                 nue = ues.size();
             }
+            const auto captures = pcapwriter.flush();
+            const auto grants = consumer->dl_grants.load();
             set_status("Decoding PCI " + std::to_string(cell.id) + ": " +
-                       std::to_string(nue) + " UEs, " + std::to_string(sf_cnt) + " subframes");
+                       std::to_string(nue) + " UEs, " + std::to_string(sf_cnt) + " subframes, " +
+                       std::to_string(grants) + " DL grants, " +
+                       std::to_string(captures.dl_packets) + " PCAP packets" +
+                       (captures.io_error ? " (capture write error)" : ""));
             diagLog("decode progress: " + std::to_string(nue) + " UEs, " +
-                    std::to_string(sf_cnt) + " subframes, sfn=" + std::to_string(sfn));
+                    std::to_string(sf_cnt) + " subframes, sfn=" + std::to_string(sfn) +
+                    " dl_grants=" + std::to_string(grants) +
+                    " pcap_dl=" + std::to_string(captures.dl_packets) +
+                    " pcap_api=" + std::to_string(captures.api_packets) +
+                    " pcap_error=" + std::to_string(captures.io_error));
             last_status_ms = nowms;
         }
     }
