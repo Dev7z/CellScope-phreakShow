@@ -2,6 +2,7 @@
 
 #include "SubframeWorker.h"
 #include "ThreadSafeQueue.h"
+#include <atomic>
 #include <future>
 
 #include "srsran/common/threads.h"
@@ -21,8 +22,8 @@ private:
   const std::string threadname = "workerthread";
   ThreadSafeQueue<SubframeWorker>& avail;
   ThreadSafeQueue<SubframeWorker>& pending;
-  volatile bool canceled;
-  volatile bool joined;
+  std::atomic<bool> canceled;
+  bool joined;
 };
 
 class SnifferThread {
@@ -40,6 +41,6 @@ private:
   ThreadSafeQueue<SubframeWorker>& avail;
   ThreadSafeQueue<SubframeWorker>& pending;
   std::future<void>                thread_return;
-  volatile bool canceled;
-  volatile bool joined;
+  std::atomic<bool> canceled;
+  bool joined;
 };

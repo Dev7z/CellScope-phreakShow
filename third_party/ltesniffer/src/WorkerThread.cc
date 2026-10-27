@@ -70,8 +70,10 @@ void SnifferThread::cancel() {
 
 void SnifferThread::wait_thread_finish() {
   if(!joined) {
+    if (thread_return.valid()) {
+      thread_return.wait();
+    }
     joined = true;
-    // thread::wait_thread_finish();
   }
 }
 

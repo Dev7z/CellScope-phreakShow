@@ -343,7 +343,7 @@ void drawNearby(ShowState& s, App& app) {
 void applyBackgroundMusic(ShowState& s) {
     std::filesystem::path musicPath;
     if (s.backgroundMusicEnabled) {
-        constexpr const char* filename = "iknowyouregettingfasterbuticatchthemall.mp3";
+        constexpr const char* filename = "buticatchemall.mp3";
         for (const auto& path : {executableDirectory() / filename,
                                  std::filesystem::path(filename),
                                  std::filesystem::path(PHREAKSHOW_MUSIC_PATH)}) {
@@ -364,7 +364,7 @@ void drawSettings(ShowState& s) {
 } // namespace detail
 } // namespace phreakshow
 
-void drawPhreakShow(App& app) {
+void drawPhreakShow(App& app, ImGuiID defaultDock) {
     using namespace phreakshow::detail;
     auto& s = state();
     if (!s.backgroundMusicInitialized) {
@@ -373,8 +373,7 @@ void drawPhreakShow(App& app) {
     }
     locateDatabase(s);
     s.tiles.beginFrame();
-    const bool visible = ImGui::Begin("phreakShow###PhreakShowWorkspace", nullptr,
-                                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    const bool visible = beginWorkspace("phreakShow###PhreakShowWorkspace", defaultDock);
     const ImGuiID dock = ImGui::GetID("PhreakShowDockSpace");
     if (!ImGui::DockBuilderGetNode(dock)) {
         ImGui::DockBuilderAddNode(dock, ImGuiDockNodeFlags_DockSpace);
@@ -398,7 +397,6 @@ void drawPhreakShow(App& app) {
     bool intercomVisible = false;
     if (visible && ImGui::BeginTabBar("PhreakShowTabs")) {
         if (ImGui::BeginTabItem("Intercom")) {
-            s.intercomActive = true;
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(2, 2));
             intercomVisible = ImGui::BeginChild("IntercomContainer", ImVec2(0, 0), ImGuiChildFlags_Borders,
                 ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
@@ -408,7 +406,6 @@ void drawPhreakShow(App& app) {
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("settings")) {
-            s.intercomActive = false;
             if (ImGui::BeginChild("SettingsContainer", ImVec2(0, 0), ImGuiChildFlags_Borders)) drawSettings(s);
             ImGui::EndChild();
             ImGui::EndTabItem();
@@ -417,13 +414,13 @@ void drawPhreakShow(App& app) {
     }
     if (!intercomVisible) ImGui::DockSpace(dock, ImVec2(0, 0), ImGuiDockNodeFlags_KeepAliveOnly);
     ImGui::End();
-    if (s.intercomActive && (intercomVisible || isFloatingPanel("Map###PhreakShowMap"))) {
+    if (shouldDrawWorkspacePanel("Map###PhreakShowMap", intercomVisible)) {
         if (beginWorkspacePanel("Map###PhreakShowMap")) drawMapCanvas(s);
         ImGui::End();
     }
-    if (s.intercomActive && (intercomVisible || isFloatingPanel("Antenna details###PhreakShowDetails"))) drawDetails(s);
-    if (s.intercomActive && (intercomVisible || isFloatingPanel("Antennas at same coordinates###PhreakShowColocated"))) drawColocated(s);
-    if (s.intercomActive && (intercomVisible || isFloatingPanel("Nearby antennas / tuning###PhreakShowNearby"))) drawNearby(s, app);
+    if (shouldDrawWorkspacePanel("Antenna details###PhreakShowDetails", intercomVisible)) drawDetails(s);
+    if (shouldDrawWorkspacePanel("Antennas at same coordinates###PhreakShowColocated", intercomVisible)) drawColocated(s);
+    if (shouldDrawWorkspacePanel("Nearby antennas / tuning###PhreakShowNearby", intercomVisible)) drawNearby(s, app);
 }
 
 void shutdownPhreakShow() {

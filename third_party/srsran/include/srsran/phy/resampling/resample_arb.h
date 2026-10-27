@@ -45,9 +45,9 @@
 typedef struct SRSRAN_API {
   float rate; // Resample rate
   float step; // Step increment through filter
-  float acc;  // Index into filter
+  float acc;  // Next phase, including input advances pending across blocks
   bool  interpolate;
-  cf_t  reg[SRSRAN_RESAMPLE_ARB_M]; // Our window of samples
+  cf_t  reg[SRSRAN_RESAMPLE_ARB_M]; // Chronological tail of the previous input block
 
 } srsran_resample_arb_t;
 

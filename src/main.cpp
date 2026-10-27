@@ -16,6 +16,7 @@
 #include "version.h"
 #include "gui/waterfall.h"
 #include "gui/phreakshow.h"
+#include "gui/workspace_panel.h"
 
 #include <algorithm>
 #include <chrono>
@@ -107,8 +108,7 @@ int main(int, char**)
     ImGui::CreateContext();
     ImPlot::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    configureWorkspaceWindows();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
     App app;
@@ -220,37 +220,37 @@ int main(int, char**)
                     app.savedDecodersB.push_back({st.freqMHz, st.baud});
         }
 
-        // Submit floating panels on inactive workspaces; docked panels stay
-        // attached through KeepAliveOnly without overlaying the active tab.
+        // Follow each panel's current dockspace, including panels moved to a
+        // different workspace or detached into their own window.
         {
-            if (showCellScope || isFloatingPanel("Control")) drawControls(app);
+            if (shouldDrawWorkspacePanel("Control", showCellScope)) drawControls(app);
             {
                 std::string t = std::string(_L("Spectrum")) + "###Spectrum";
-                if (showCellScope || isFloatingPanel(t.c_str()))
+                if (shouldDrawWorkspacePanel(t.c_str(), showCellScope))
                     drawSpectrum(app, app.viewA, app.decoders, t.c_str(), true, false);
             }
             {
                 std::string t = std::string(_L("Waterfall")) + "###Waterfall";
-                if (showCellScope || isFloatingPanel(t.c_str())) drawWaterfall(app, app.viewA, t.c_str());
+                if (shouldDrawWorkspacePanel(t.c_str(), showCellScope)) drawWaterfall(app, app.viewA, t.c_str());
             }
             if (app.dualMode)
             {
                 {
                     std::string t = std::string(_L("Spectrum")) + "###Spectrum (B)";
-                    if (showCellScope || isFloatingPanel(t.c_str()))
+                    if (shouldDrawWorkspacePanel(t.c_str(), showCellScope))
                         drawSpectrum(app, app.viewB, app.decodersB, t.c_str(), true, true);
                 }
                 {
                     std::string t = std::string(_L("Waterfall")) + "###Waterfall (B)";
-                    if (showCellScope || isFloatingPanel(t.c_str())) drawWaterfall(app, app.viewB, t.c_str());
+                    if (shouldDrawWorkspacePanel(t.c_str(), showCellScope)) drawWaterfall(app, app.viewB, t.c_str());
                 }
             }
             drawAbout(app);
 #ifdef HAS_LTE
-            if (showCellScope || isFloatingPanel("LTE")) drawLte(app);
-            if (showCellScope || isFloatingPanel("UEs")) drawLteUes(app);
-            if (showCellScope || isFloatingPanel("Traffic")) drawLteTraffic(app);
-            if (showCellScope || isFloatingPanel("Calls")) drawLteCalls(app);
+            if (shouldDrawWorkspacePanel("LTE", showCellScope)) drawLte(app);
+            if (shouldDrawWorkspacePanel("UEs", showCellScope)) drawLteUes(app);
+            if (shouldDrawWorkspacePanel("Traffic", showCellScope)) drawLteTraffic(app);
+            if (shouldDrawWorkspacePanel("Calls", showCellScope)) drawLteCalls(app);
 #endif
         }
 

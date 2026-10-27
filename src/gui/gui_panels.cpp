@@ -1869,13 +1869,6 @@ void drawLteCalls(App& app)
 // layout via a custom settings handler.
 // ---------------------------------------------------------------------------
 
-bool isFloatingPanel(const char* name)
-{
-    const auto* window = ImGui::FindWindowByName(name);
-    return window && (window->DockId == 0 || (window->DockNode &&
-        !ImGui::DockNodeGetRootNode(window->DockNode)->IsDockSpace()));
-}
-
 bool drawDockHost(App& app)
 {
     // The default dock layout is a baked-in ImGui .ini loaded from main() (on
@@ -1906,15 +1899,9 @@ bool drawDockHost(App& app)
     {
         ImGui::DockBuilderAddNode(workspaceDock, ImGuiDockNodeFlags_DockSpace);
         ImGui::DockBuilderSetNodeSize(workspaceDock, vp->WorkSize);
-        ImGui::DockBuilderDockWindow("CellScope###CellScopeWorkspace", workspaceDock);
-        ImGui::DockBuilderDockWindow("phreakShow###PhreakShowWorkspace", workspaceDock);
         ImGui::DockBuilderFinish(workspaceDock);
     }
-    // Nested workspace dockspaces are unreliable as detached OS windows on
-    // some backends. Keep the two workspace tabs in the main host; their
-    // individual tool panels can still be moved and docked normally.
-    ImGui::DockSpace(workspaceDock, ImVec2(0, 0),
-        ImGuiDockNodeFlags_NoUndocking | ImGuiDockNodeFlags_NoDockingSplit);
+    ImGui::DockSpace(workspaceDock, ImVec2(0, 0));
 
     if (ImGui::BeginMenuBar())
     {
@@ -1951,14 +1938,10 @@ bool drawDockHost(App& app)
     }
 
     ImGui::End();
-    // Also recover workspaces that were detached in an older saved layout.
-    ImGui::SetNextWindowDockID(workspaceDock, ImGuiCond_Always);
-    const bool showCellScope = ImGui::Begin("CellScope###CellScopeWorkspace", nullptr,
-        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    const bool showCellScope = beginWorkspace("CellScope###CellScopeWorkspace", workspaceDock);
     ImGui::DockSpace(dockId, ImVec2(0, 0), showCellScope ? 0 : ImGuiDockNodeFlags_KeepAliveOnly);
     ImGui::End();
-    ImGui::SetNextWindowDockID(workspaceDock, ImGuiCond_Always);
-    drawPhreakShow(app);
+    drawPhreakShow(app, workspaceDock);
     return showCellScope;
 }
 

@@ -62,6 +62,7 @@ void cancel() {
   std::lock_guard<std::mutex> lock(m);
   canceled = true;
   c.notify_all();   //wake all waiting consumers
+  e.notify_all();   //wake waitEmpty() even when work remains queued
 }
 
 bool waitEmpty() {
@@ -72,7 +73,10 @@ bool waitEmpty() {
   return q.empty();
 }
 
-bool isEmpty() {return q.empty();}
+bool isEmpty() {
+  std::lock_guard<std::mutex> lock(m);
+  return q.empty();
+}
 
 private:
   std::queue<std::shared_ptr<T>> q;

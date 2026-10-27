@@ -286,8 +286,12 @@ struct LteEngine::Impl {
         const cf_t* src = stage;
         int         n   = ns;
         if (!resample_bypass) {
-            if ((int)resample_out.size() < ns * 2 + 64) {
-                resample_out.resize(ns * 2 + 64);
+            // Search -> decode can upsample 1.92 Msps IQ to 30.72 Msps.
+            // The old fixed 2x allowance let the C resampler overrun this buffer.
+            const size_t capacity = (size_t)std::ceil((double)ns *
+                SRSRAN_RESAMPLE_ARB_N / resampler.step) + 64;
+            if (resample_out.size() < capacity) {
+                resample_out.resize(capacity);
             }
             n   = srsran_resample_arb_compute(&resampler, (cf_t*)stage, resample_out.data(), ns);
             src = resample_out.data();

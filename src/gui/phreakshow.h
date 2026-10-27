@@ -30,7 +30,9 @@ inline bool validMapCoordinates(double longitude, double latitude) {
 
 // Draw the contents of the phreakShow application tab.
 struct App;
-void drawPhreakShow(App& app);
+void drawPhreakShow(App& app, unsigned int defaultDock);
+// Panel visibility and layout actions for the application View menu.
+void drawPhreakShowPanelMenu();
 
 // Release map textures while the OpenGL context is still current.
 void shutdownPhreakShow();

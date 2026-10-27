@@ -131,17 +131,31 @@ int srsran_resample_arb_compute(srsran_resample_arb_t* q, cf_t* input, cf_t* out
 {
   int   cnt   = 0;
   int   n_out = 0;
-  int   idx   = 0;
   cf_t  res1, res2;
   cf_t* filter_input;
-  float frac = 0;
-  memset(q->reg, 0, SRSRAN_RESAMPLE_ARB_M * sizeof(cf_t));
+  cf_t  boundary[SRSRAN_RESAMPLE_ARB_M];
+
+  if (n_in <= 0) {
+    return 0;
+  }
 
   while (cnt < n_in) {
+    // Carry both fractional phase and pending input advances across blocks.
+    // A downsampling step can skip beyond the end of a short callback.
+    while (q->acc >= SRSRAN_RESAMPLE_ARB_N && cnt < n_in) {
+      q->acc -= SRSRAN_RESAMPLE_ARB_N;
+      cnt++;
+    }
+    if (cnt == n_in) {
+      break;
+    }
+    int   idx  = (int)q->acc;
+    float frac = q->acc - idx;
 
     if (cnt < SRSRAN_RESAMPLE_ARB_M) {
-      memcpy(&q->reg[SRSRAN_RESAMPLE_ARB_M - cnt], input, (cnt) * sizeof(cf_t));
-      filter_input = q->reg;
+      memcpy(boundary, &q->reg[cnt], (SRSRAN_RESAMPLE_ARB_M - cnt) * sizeof(cf_t));
+      memcpy(&boundary[SRSRAN_RESAMPLE_ARB_M - cnt], input, cnt * sizeof(cf_t));
+      filter_input = boundary;
     } else {
       filter_input = &input[cnt - SRSRAN_RESAMPLE_ARB_M];
     }
@@ -157,21 +171,15 @@ int srsran_resample_arb_compute(srsran_resample_arb_t* q, cf_t* input, cf_t* out
     output++;
     n_out++;
     q->acc += q->step;
-    idx = (int)(q->acc);
+  }
 
-    while (idx >= SRSRAN_RESAMPLE_ARB_N) {
-      q->acc -= SRSRAN_RESAMPLE_ARB_N;
-      idx -= SRSRAN_RESAMPLE_ARB_N;
-      if (cnt < n_in) {
-        cnt++;
-      }
-    }
-
-    if (q->interpolate) {
-      frac = q->acc - idx;
-      if (frac < 0)
-        frac = frac * (-1);
-    }
+  // Save the chronological tail for the next block, including callbacks
+  // shorter than the FIR. Reinitialization is the only place to zero it.
+  if (n_in >= SRSRAN_RESAMPLE_ARB_M) {
+    memcpy(q->reg, &input[n_in - SRSRAN_RESAMPLE_ARB_M], sizeof(q->reg));
+  } else {
+    memmove(q->reg, &q->reg[n_in], (SRSRAN_RESAMPLE_ARB_M - n_in) * sizeof(cf_t));
+    memcpy(&q->reg[SRSRAN_RESAMPLE_ARB_M - n_in], input, n_in * sizeof(cf_t));
   }
   return n_out;
 }
