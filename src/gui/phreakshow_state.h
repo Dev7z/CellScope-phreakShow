@@ -4,7 +4,6 @@
 #include "gui/antenna_database.h"
 #include "gui/map_tiles.h"
 #include "gui/map_projection.h"
-#include "gui/phreakshow_layout.h"
 #include "audio/background_music.h"
 #include <array>
 #include <map>
@@ -30,12 +29,7 @@ struct ShowState {
     std::array<bool, 4> nearbyProviders{false, true, true, true};
     bool includeIndoor = true;
     bool nearbyIncludeIndoor = true;
-    std::array<bool, panelCount> panelsOpen = [] {
-        std::array<bool, panelCount> open{};
-        open.fill(true);
-        return open;
-    }();
-    bool resetLayout = false;
+    float mapSettingsHeight = 0;
     double mapX = 0.5 + 8.13 / 360.0;
     double mapY = mercatorY(46.8);
     int zoom = 8;
@@ -168,7 +162,6 @@ struct ShowState {
 ShowState& state();
 void loadDatabase(ShowState& state);
 void drawMapCanvas(ShowState& state);
-void drawMapControls(ShowState& state);
 // Preserve widget behavior while fitting labels into narrow panes.
 bool buttonEllipsis(const char* label);
 bool checkboxEllipsis(const char* label, bool* value);

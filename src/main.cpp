@@ -17,6 +17,7 @@
 #include "gui/waterfall.h"
 #include "gui/phreakshow.h"
 #include "gui/workspace_panel.h"
+#include "gui/workspace_renderer.h"
 
 #include <algorithm>
 #include <chrono>
@@ -146,6 +147,11 @@ int main(int, char**)
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
+    const auto viewportBackends = ImGuiBackendFlags_PlatformHasViewports | ImGuiBackendFlags_RendererHasViewports;
+    const bool nativeWindows = (io.BackendFlags & viewportBackends) == viewportBackends;
+    if (!nativeWindows) io.ConfigFlags &= ~ImGuiConfigFlags_ViewportsEnable;
+    logWrite("GUI backend: %s; native panel windows: %s", io.BackendPlatformName,
+             nativeWindows ? "enabled" : "unavailable (requires a compatible window backend, e.g. X11)");
 
     // If the saved layout predates the current default (or none was saved),
     // rebuild the canonical default layout so users get the intended arrangement.
@@ -254,24 +260,8 @@ int main(int, char**)
 #endif
         }
 
-        int display_w, display_h;
-        glfwGetFramebufferSize(window, &display_w, &display_h);
-        glViewport(0, 0, display_w, display_h);
-        glClearColor(clear_color.x, clear_color.y, clear_color.z, clear_color.w);
-        glClear(GL_COLOR_BUFFER_BIT);
-
         ImGui::Render();
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-        {
-            GLFWwindow* previous = glfwGetCurrentContext();
-            ImGui::UpdatePlatformWindows();
-            ImGui::RenderPlatformWindowsDefault();
-            glfwMakeContextCurrent(previous);
-        }
-
-        glfwSwapBuffers(window);
+        renderWorkspaceWindows(window, clear_color);
     }
 
     // Persist settings + dock layout to cellscope.ini before shutting down.

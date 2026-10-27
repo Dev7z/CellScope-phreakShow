@@ -2,13 +2,25 @@
 
 #include "imgui_internal.h"
 
+inline void configureWorkspaceWindows()
+{
+    auto& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable | ImGuiConfigFlags_ViewportsEnable;
+    // Floating panels keep their own native window even when moved back over
+    // the main window. Dragging onto a dock target can still dock them normally.
+    io.ConfigViewportsNoAutoMerge = true;
+    io.ConfigViewportsNoDecoration = false;
+    io.ConfigViewportsNoTaskBarIcon = false;
+    io.ConfigViewportsNoDefaultParent = true;
+}
+
 // A default applies only to a new workspace. Saved floating positions and user
 // docking changes must survive subsequent frames and application restarts.
-inline bool beginWorkspace(const char* name, ImGuiID defaultDock, ImGuiWindowFlags flags = 0)
+inline bool beginWorkspace(const char* name, ImGuiID defaultDock)
 {
     ImGui::SetNextWindowDockID(defaultDock, ImGuiCond_FirstUseEver);
     return ImGui::Begin(name, nullptr, ImGuiWindowFlags_NoFocusOnAppearing |
-        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | flags);
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 }
 
 // Panels can move between workspaces or into floating tab groups. Submit them
@@ -26,18 +38,7 @@ inline bool shouldDrawWorkspacePanel(const char* name, bool workspaceVisible)
 
 // Returning to a workspace reactivates all its panels in submission order.
 // Keep the selected dock tab instead of letting each appearing panel take focus.
-inline bool beginWorkspacePanel(const char* name, bool* open = nullptr)
+inline bool beginWorkspacePanel(const char* name)
 {
-    ImGui::SetNextWindowSize(ImVec2(600, 420), ImGuiCond_FirstUseEver);
-    return ImGui::Begin(name, open, ImGuiWindowFlags_NoFocusOnAppearing);
-}
-
-inline void configureWorkspaceWindows()
-{
-    auto& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable | ImGuiConfigFlags_ViewportsEnable;
-    // A detached panel always owns a native platform window. Overlapping the
-    // main window must not silently turn it back into an internal floating pane.
-    io.ConfigViewportsNoAutoMerge = true;
-    io.ConfigViewportsNoTaskBarIcon = false;
+    return ImGui::Begin(name, nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
 }

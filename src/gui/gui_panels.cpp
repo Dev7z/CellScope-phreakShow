@@ -1396,18 +1396,26 @@ void drawAbout(App& app)
             ImGui::Spacing();
             ImGui::TextWrapped("Thanks to Mike AA8IA for donating an Airspy R2 and Airspy Mini for development.");
             ImGui::TableNextColumn();
+
+
+
+
+
+
+
+
             ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.3f);
             ImGui::TextUnformatted("phreakShow");
             ImGui::PopFont();
             ImGui::Separator();
-            ImGui::TextWrapped("Antenna database explorer, map and tuning companion for CellScope.");
+            ImGui::TextWrapped("vibecoded pice of shit by Dev7z");
             ImGui::Spacing();
-            ImGui::TextWrapped("Browse antennas by location, company or frequency. Inspect station details and tune CellScope to a selected antenna.");
+            ImGui::TextWrapped("www.dev7z.net");
             ImGui::Spacing();
             ImGui::TextWrapped("Swiss maps and aerial imagery: swisstopo. World overview: Natural Earth.");
             ImGui::Spacing();
             ImGui::TextWrapped("Enable Map navigation with hotkeys in the map controls:");
-            ImGui::TextWrapped("WASD: pan\n1 / 2 / 3: Swisscom / Sunrise / Salt\nQ / E: shorten / lengthen azimuth lines\n+ / -: zoom\nC: user point at center\nV: user point at cursor");
+            ImGui::TextWrapped("WASD: pan\n1 / 2 / 3: Swisscom / Sunrise / Salt\nQ / E: shorten / lengthen azimuth lines\n+ / -: zoom\nC: user point at center\nV: user point at cursor\nX: Toggle satelite view");
             ImGui::EndTable();
         }
     }

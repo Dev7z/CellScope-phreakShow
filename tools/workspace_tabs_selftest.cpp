@@ -22,7 +22,7 @@ public:
         io.LogFilename = nullptr;
         io.DisplaySize = ImVec2(1200, 800);
         io.DeltaTime = 1.0f / 60;
-        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable | ImGuiConfigFlags_ViewportsEnable;
+        configureWorkspaceWindows();
         io.BackendFlags |= ImGuiBackendFlags_PlatformHasViewports | ImGuiBackendFlags_RendererHasViewports;
         // Exercise ImGui's actual platform-window lifecycle without opening OS
         // windows or needing graphics/SDR hardware.
@@ -232,6 +232,13 @@ static void testDocking()
         fixture.frames(6);
         fixture.expectSubmitted("Calls", true); // floating panel survives workspace switch
         require(calls->Viewport != ImGui::GetMainViewport(), "tool panel did not detach outside the main window");
+        // Passing over the main window must retain the separate native window;
+        // only an explicit docking operation should merge it into a dockspace.
+        ImGui::SetWindowPos(calls, ImVec2(150, 100));
+        ImGui::SetWindowSize(calls, ImVec2(400, 300));
+        fixture.frames(6);
+        require(calls->Viewport != ImGui::GetMainViewport(), "floating tool panel lost its native viewport over the main window");
+        fixture.expectSubmitted("Calls", true);
     }
 }
 
